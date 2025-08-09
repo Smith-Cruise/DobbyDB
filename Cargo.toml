@@ -1,0 +1,15 @@
+[workspace.package]
+name = "DobbyDB"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+resolver="2"
+members = [
+    "src/parser"
+]
+
+[workspace.dependencies]
+datafusion = "49.0.0"
+datafusion-sql = "49.0.0"
+sqlparser = "0.55.0"
