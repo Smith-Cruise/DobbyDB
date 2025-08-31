@@ -2,11 +2,11 @@ use sqlparser::ast::Statement as SQLStatement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
-    Statement(Box<SQLStatement>),
-    ShowCatalogsStatement(ShowCatalogsStatement)
+    SQLStatement(Box<SQLStatement>),
+    ShowCatalogsStatement(ShowCatalogsStmt)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShowCatalogsStatement {
+pub struct ShowCatalogsStmt {
 
 }

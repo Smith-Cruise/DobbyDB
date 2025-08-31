@@ -1,0 +1,10 @@
+[package]
+name = "dobbydb-sql"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+datafusion = { workspace = true }
+sqlparser = { workspace = true }
+#datafusion-sql = {workspace = true}
+tokio = { workspace = true }

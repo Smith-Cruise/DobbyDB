@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
 use datafusion::error::DataFusionError;
@@ -6,7 +5,8 @@ use datafusion::logical_expr::sqlparser::dialect::{Dialect, GenericDialect};
 use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
-use crate::ast::statement::{ShowCatalogsStatement, Statement};
+use std::collections::VecDeque;
+use crate::statements::{ShowCatalogsStmt, Statement};
 
 // Use `Parser::expected` instead, if possible
 macro_rules! parser_err {
@@ -160,20 +160,20 @@ impl<'a> DobbyDBParser<'a> {
                     let val = w.value.to_ascii_uppercase();
                     if val == "CATALOGS" {
                         self.parser.next_token();
-                        return Ok(Statement::ShowCatalogsStatement(ShowCatalogsStatement{}));
+                        return Ok(Statement::ShowCatalogsStatement(ShowCatalogsStmt{}));
                     }
                 },
                 _ => {}
             }
         }
-        Ok(Statement::Statement(Box::from(self.parser.parse_show()?)))
+        Ok(Statement::SQLStatement(Box::from(self.parser.parse_show()?)))
     }
 
     /// Helper method to parse a statement and handle errors consistently, especially for recursion limits
     fn parse_and_handle_statement(&mut self) -> Result<Statement, DataFusionError> {
         self.parser
             .parse_statement()
-            .map(|stmt| Statement::Statement(Box::from(stmt)))
+            .map(|stmt| Statement::SQLStatement(Box::from(stmt)))
             .map_err(|e| match e {
                 ParserError::RecursionLimitExceeded => DataFusionError::SQL(
                     Box::new(ParserError::RecursionLimitExceeded),
@@ -189,7 +189,18 @@ impl<'a> DobbyDBParser<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::statements::ShowCatalogsStmt;
+    use crate::statements::Statement::ShowCatalogsStatement;
     use super::*;
+
+
+    #[test]
+    fn test_show_catalogs() -> Result<(), DataFusionError> {
+        let statement = DobbyDBParser::parse_sql("show catalogs")?;
+        let stmt = &statement[0];
+        assert_eq!(ShowCatalogsStatement(ShowCatalogsStmt{}), *stmt);
+        Ok(())
+    }
 
     #[test]
     fn test_simple_sql() -> Result<(), DataFusionError> {
