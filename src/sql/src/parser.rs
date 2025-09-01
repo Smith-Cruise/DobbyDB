@@ -6,7 +6,7 @@ use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 use std::collections::VecDeque;
-use crate::statements::{ShowCatalogsStmt, Statement};
+use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 
 // Use `Parser::expected` instead, if possible
 macro_rules! parser_err {
@@ -23,7 +23,7 @@ macro_rules! parser_err {
 const DEFAULT_RECURSION_LIMIT: usize = 50;
 const DEFAULT_DIALECT: GenericDialect = GenericDialect {};
 
-pub struct DobbyDBParserBuilder<'a> {
+pub struct ExtendedParserBuilder<'a> {
     /// The SQL string to parse
     sql: &'a str,
     /// The Dialect to use (defaults to [`GenericDialect`]
@@ -32,7 +32,7 @@ pub struct DobbyDBParserBuilder<'a> {
     recursion_limit: usize,
 }
 
-impl<'a> DobbyDBParserBuilder<'a> {
+impl<'a> ExtendedParserBuilder<'a> {
     /// Create a new parser builder for the specified tokens using the
     /// [`GenericDialect`].
     pub fn new(sql: &'a str) -> Self {
@@ -43,14 +43,14 @@ impl<'a> DobbyDBParserBuilder<'a> {
         }
     }
 
-    pub fn build(self) -> Result<DobbyDBParser<'a>, DataFusionError> {
+    pub fn build(self) -> Result<ExtendedParser<'a>, DataFusionError> {
         let mut tokenizer = Tokenizer::new(self.dialect, self.sql);
         // Convert TokenizerError -> ParserError
         let tokens = tokenizer
             .tokenize_with_location()
             .map_err(ParserError::from)?;
 
-        Ok(DobbyDBParser {
+        Ok(ExtendedParser {
             parser: Parser::new(self.dialect)
                 .with_tokens_with_locations(tokens)
                 .with_recursion_limit(self.recursion_limit),
@@ -62,18 +62,18 @@ impl<'a> DobbyDBParserBuilder<'a> {
     }
 }
 
-struct DobbyDBParser<'a> {
+struct ExtendedParser<'a> {
     pub parser: Parser<'a>,
     options: SqlParserOptions,
 }
 
-impl<'a> DobbyDBParser<'a> {
-    pub fn parse_sql(sql: &str) -> Result<VecDeque<Statement>, DataFusionError> {
-        let mut parser = DobbyDBParserBuilder::new(sql).build()?;
+impl<'a> ExtendedParser<'a> {
+    pub fn parse_sql(sql: &str) -> Result<VecDeque<ExtendedStatement>, DataFusionError> {
+        let mut parser = ExtendedParserBuilder::new(sql).build()?;
         parser.parse_statements()
     }
 
-    pub fn parse_statements(&mut self) -> Result<VecDeque<Statement>, DataFusionError> {
+    pub fn parse_statements(&mut self) -> Result<VecDeque<ExtendedStatement>, DataFusionError> {
         let mut stmts = VecDeque::new();
         let mut expecting_statement_delimiter = false;
         loop {
@@ -114,12 +114,12 @@ impl<'a> DobbyDBParser<'a> {
         )
     }
 
-    pub fn parse_statement(&mut self) -> Result<Statement, DataFusionError> {
+    pub fn parse_statement(&mut self) -> Result<ExtendedStatement, DataFusionError> {
         match self.parser.peek_token().token {
             Token::Word(w) => {
                 match w.keyword {
                     Keyword::SHOW => {
-                        self.parser.next_token();
+                        self.parser.advance_token();
                         self.parse_show()
                     }
                     // Keyword::CREATE => {
@@ -153,27 +153,27 @@ impl<'a> DobbyDBParser<'a> {
         }
     }
 
-    fn parse_show(&mut self) -> Result<Statement, DataFusionError> {
+    fn parse_show(&mut self) -> Result<ExtendedStatement, DataFusionError> {
         if let token = self.parser.peek_token() {
             match &token.token {
                 Token::Word(w) => {
                     let val = w.value.to_ascii_uppercase();
                     if val == "CATALOGS" {
-                        self.parser.next_token();
-                        return Ok(Statement::ShowCatalogsStatement(ShowCatalogsStmt{}));
+                        self.parser.advance_token();
+                        return Ok(ExtendedStatement::ShowCatalogsStatement);
                     }
                 },
                 _ => {}
             }
         }
-        Ok(Statement::SQLStatement(Box::from(self.parser.parse_show()?)))
+        Ok(ExtendedStatement::SQLStatement(Box::from(self.parser.parse_show()?)))
     }
 
     /// Helper method to parse a statement and handle errors consistently, especially for recursion limits
-    fn parse_and_handle_statement(&mut self) -> Result<Statement, DataFusionError> {
+    fn parse_and_handle_statement(&mut self) -> Result<ExtendedStatement, DataFusionError> {
         self.parser
             .parse_statement()
-            .map(|stmt| Statement::SQLStatement(Box::from(stmt)))
+            .map(|stmt| ExtendedStatement::SQLStatement(Box::from(stmt)))
             .map_err(|e| match e {
                 ParserError::RecursionLimitExceeded => DataFusionError::SQL(
                     Box::new(ParserError::RecursionLimitExceeded),
@@ -189,25 +189,33 @@ impl<'a> DobbyDBParser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::statements::ShowCatalogsStmt;
-    use crate::statements::Statement::ShowCatalogsStatement;
+    use datafusion::prelude::SessionContext;
     use super::*;
-
 
     #[test]
     fn test_show_catalogs() -> Result<(), DataFusionError> {
-        let statement = DobbyDBParser::parse_sql("show catalogs")?;
+        let statement = ExtendedParser::parse_sql("show catalogs")?;
         let stmt = &statement[0];
-        assert_eq!(ShowCatalogsStatement(ShowCatalogsStmt{}), *stmt);
+        assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
         Ok(())
     }
 
     #[test]
     fn test_simple_sql() -> Result<(), DataFusionError> {
-        let statement = DobbyDBParser::parse_sql("show catalogs")?;
+        let statement = ExtendedParser::parse_sql("show catalogs")?;
         println!("{:?}", statement);
-        let statement = DobbyDBParser::parse_sql("show tables")?;
+        let statement = ExtendedParser::parse_sql("show tables")?;
         println!("{:?}", statement);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_datafusion() -> Result<(), DataFusionError> {
+        let sql = "show tables";
+        let ctx = SessionContext::new();
+        let df = ctx.sql(sql).await?;
+        let df = df.collect().await?;
+        println!("{:?}", df);
         Ok(())
     }
 }

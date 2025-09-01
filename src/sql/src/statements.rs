@@ -1,12 +1,12 @@
 use sqlparser::ast::Statement as SQLStatement;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Statement {
+pub enum ExtendedStatement {
     SQLStatement(Box<SQLStatement>),
-    ShowCatalogsStatement(ShowCatalogsStmt)
+    ShowCatalogsStatement
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShowCatalogsStmt {
+pub struct ShowCatalogsStatement {
 
 }
