@@ -190,6 +190,7 @@ impl<'a> ExtendedParser<'a> {
 #[cfg(test)]
 mod tests {
     use datafusion::prelude::SessionContext;
+    use crate::planner::ExtendedQueryPlanner;
     use super::*;
 
     #[test]
@@ -209,6 +210,16 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_logical_plan() -> Result<(), DataFusionError> {
+        let statement = ExtendedParser::parse_sql("show catalogs")?;
+        println!("{:?}", statement);
+        let planner = ExtendedQueryPlanner::new();
+        let logical_plan = planner.create_logical_plan(statement[0].clone()).await?;
+        println!("{:?}", logical_plan);
+        Ok(())
+    }
+    
     #[tokio::test]
     async fn test_datafusion() -> Result<(), DataFusionError> {
         let sql = "show tables";
