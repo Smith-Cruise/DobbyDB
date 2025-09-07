@@ -10,3 +10,4 @@ sqlparser = { workspace = true }
 #datafusion-sql = {workspace = true}
 tokio = { workspace = true }
 async-trait = "0.1.88"
+futures = "0.3.31"

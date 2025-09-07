@@ -189,7 +189,9 @@ impl<'a> ExtendedParser<'a> {
 
 #[cfg(test)]
 mod tests {
+    use datafusion::arrow;
     use datafusion::prelude::SessionContext;
+    use futures::StreamExt;
     use crate::planner::ExtendedQueryPlanner;
     use super::*;
 
@@ -211,19 +213,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_logical_plan() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("show catalogs")?;
+    async fn test_show_tables_logical_plan() -> Result<(), DataFusionError> {
+        let statement = ExtendedParser::parse_sql("show tables")?;
         println!("{:?}", statement);
-        let planner = ExtendedQueryPlanner::new();
+        let planner = ExtendedQueryPlanner::new()?;
         let logical_plan = planner.create_logical_plan(statement[0].clone()).await?;
         println!("{:?}", logical_plan);
         Ok(())
     }
-    
+
+    #[tokio::test]
+    async fn test_logical_plan() -> Result<(), DataFusionError> {
+        let statement = ExtendedParser::parse_sql("show catalogs")?;
+        println!("{:?}", statement);
+        let planner = ExtendedQueryPlanner::new()?;
+        let logical_plan = planner.create_logical_plan(statement[0].clone()).await?;
+        println!("{:?}", logical_plan);
+        let physical_plan = planner.create_physical_plan(&logical_plan).await?;
+        println!("{:?}", physical_plan);
+        let mut batch_stream = planner.execute_physical_plan(physical_plan.clone()).await?;
+        while let Some(batch) = batch_stream.next().await {
+            let batch = batch?;
+            println!("收到 batch，包含 {} 行", batch.num_rows());
+            arrow::util::pretty::print_batches(&[batch])?;
+        }
+        // physical_plan.execute()
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_datafusion() -> Result<(), DataFusionError> {
         let sql = "show tables";
         let ctx = SessionContext::new();
+        // ctx.register_table()
         let df = ctx.sql(sql).await?;
         let df = df.collect().await?;
         println!("{:?}", df);

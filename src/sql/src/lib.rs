@@ -1,4 +1,5 @@
 pub mod parser;
 pub mod statements;
 pub mod planner;
-mod executor;
+pub mod executor;
+pub mod catalog;
