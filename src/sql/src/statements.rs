@@ -5,8 +5,3 @@ pub enum ExtendedStatement {
     SQLStatement(Box<SQLStatement>),
     ShowCatalogsStatement
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShowCatalogsStatement {
-
-}

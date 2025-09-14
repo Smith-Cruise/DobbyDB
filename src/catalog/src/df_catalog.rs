@@ -1,15 +1,13 @@
-use datafusion::arrow::array::StringBuilder;
+use std::any::Any;
+use std::sync::Arc;
+use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::{
-    CatalogProvider, MemorySchemaProvider, SchemaProvider,
-};
+use datafusion::catalog::{CatalogProvider, MemorySchemaProvider, SchemaProvider};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
-use std::any::Any;
-use std::sync::Arc;
+use crate::catalog::{get_catalog_manager, CatalogConfig};
 
 pub const INTERNAL_CATALOG_NAME: &str = "internal";
 pub const DOBBYDB_SCHEMA_NAME: &str = "dobbydb";
@@ -47,44 +45,59 @@ impl CatalogProvider for InternalCatalog {
 }
 
 #[derive(Debug)]
-pub struct InformationSchemaCatalogs {
+pub struct InformationSchemaShowCatalogs {
     schema: SchemaRef,
 }
 
-impl InformationSchemaCatalogs {
-    pub fn new() -> Result<InformationSchemaCatalogs, DataFusionError> {
+impl InformationSchemaShowCatalogs {
+    pub fn new() -> Result<InformationSchemaShowCatalogs, DataFusionError> {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("catalog_name", DataType::Utf8, false),
             Field::new("catalog_type", DataType::Utf8, false),
+            Field::new("catalog_configs", DataType::Utf8, false),
         ]));
 
-        let information_schema_catalogs = InformationSchemaCatalogs {
+        let information_schema_catalogs = InformationSchemaShowCatalogs {
             schema: schema.clone(),
         };
         Ok(information_schema_catalogs)
     }
 }
 
-impl PartitionStream for InformationSchemaCatalogs {
+impl PartitionStream for InformationSchemaShowCatalogs {
     fn schema(&self) -> &SchemaRef {
         &self.schema
     }
 
     fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+
         let mut catalog_name_builder = StringBuilder::new();
         let mut catalog_type_builder = StringBuilder::new();
-        catalog_name_builder.append_value("hive_catalog");
-        catalog_type_builder.append_value("HMS");
-        catalog_name_builder.append_value("iceberg_catalog");
-        catalog_type_builder.append_value("ICEBERG");
+        let mut catalog_configs_builder = StringBuilder::new();
+
+        let catalog_manager = get_catalog_manager().read().unwrap();
+        for (key, value) in catalog_manager.get_catalogs() {
+            catalog_name_builder.append_value(key.clone());
+            match value {
+                CatalogConfig::HMS(hms_catalog) => {
+                    catalog_type_builder.append_value("HMS");
+                    catalog_configs_builder.append_value(format!("{:?}", hms_catalog));
+                },
+                CatalogConfig::GLUE(glue_catalog) => {
+                    catalog_type_builder.append_value("GLUE");
+                    catalog_configs_builder.append_value(format!("{:?}", glue_catalog));
+                }
+            }
+
+        }
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
                 Arc::new(catalog_name_builder.finish()),
                 Arc::new(catalog_type_builder.finish()),
+                Arc::new(catalog_configs_builder.finish())
             ],
-        )
-        .unwrap();
+        ).unwrap();
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&self.schema),
             futures::stream::once(async move { Ok(batch) }),

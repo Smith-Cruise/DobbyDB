@@ -6,7 +6,7 @@ use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 use std::collections::VecDeque;
-use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
+use crate::statements::{ExtendedStatement};
 
 // Use `Parser::expected` instead, if possible
 macro_rules! parser_err {
@@ -62,8 +62,8 @@ impl<'a> ExtendedParserBuilder<'a> {
     }
 }
 
-struct ExtendedParser<'a> {
-    pub parser: Parser<'a>,
+pub struct ExtendedParser<'a> {
+    parser: Parser<'a>,
     options: SqlParserOptions,
 }
 
@@ -217,7 +217,7 @@ mod tests {
         let statement = ExtendedParser::parse_sql("show tables")?;
         println!("{:?}", statement);
         let planner = ExtendedQueryPlanner::new()?;
-        let logical_plan = planner.create_logical_plan(statement[0].clone()).await?;
+        let logical_plan = planner.create_logical_plan(&statement[0]).await?;
         println!("{:?}", logical_plan);
         Ok(())
     }
@@ -227,7 +227,7 @@ mod tests {
         let statement = ExtendedParser::parse_sql("show catalogs")?;
         println!("{:?}", statement);
         let planner = ExtendedQueryPlanner::new()?;
-        let logical_plan = planner.create_logical_plan(statement[0].clone()).await?;
+        let logical_plan = planner.create_logical_plan(&statement[0]).await?;
         println!("{:?}", logical_plan);
         let physical_plan = planner.create_physical_plan(&logical_plan).await?;
         println!("{:?}", physical_plan);

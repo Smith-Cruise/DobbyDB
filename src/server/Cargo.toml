@@ -1,14 +1,11 @@
 [package]
-name = "dobbydb-sql"
+name = "dobbydb-server"
 version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
-#arrow-schema = "56.1.0"
 datafusion = { workspace = true }
-sqlparser = { workspace = true }
-#datafusion-sql = {workspace = true}
 tokio = { workspace = true }
-async-trait = "0.1.88"
-futures = { workspace = true }
 dobbydb-catalog = { workspace = true }
+dobbydb-sql = {workspace = true}
+futures = { workspace = true }

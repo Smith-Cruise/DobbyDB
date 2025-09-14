@@ -1,0 +1,10 @@
+[package]
+name = "dobbydb-catalog"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+datafusion = { workspace = true }
+toml = { workspace = true }
+futures = { workspace = true }

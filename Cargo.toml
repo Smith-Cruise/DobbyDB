@@ -5,11 +5,18 @@ edition = "2024"
 
 [workspace]
 resolver = "2"
-members = [
+members = [ "src/catalog", "src/server",
     "src/sql"]
 
 [workspace.dependencies]
 datafusion = "49.0.0"
 datafusion-sql = "49.0.0"
+datafusion-common = "49.0.0"
 sqlparser = "0.55.0"
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
+serde = { version = "1.0.219", features = ["derive"] }
+toml = "0.9.5"
+futures = "0.3.31"
+dobbydb-catalog = { path = "src/catalog" }
+dobbydb-server = { path = "src/server" }
+dobbydb-sql = { path = "src/sql" }
