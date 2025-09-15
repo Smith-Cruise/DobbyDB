@@ -3,6 +3,7 @@ use std::sync::Arc;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::{CatalogProvider, MemorySchemaProvider, SchemaProvider};
+use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -10,18 +11,17 @@ use datafusion::physical_plan::streaming::PartitionStream;
 use crate::catalog::{get_catalog_manager, CatalogConfig};
 
 pub const INTERNAL_CATALOG_NAME: &str = "internal";
-pub const DOBBYDB_SCHEMA_NAME: &str = "dobbydb";
 pub const CATALOGS_TABLE_NAME: &str = "catalogs";
 
 #[derive(Debug)]
 pub struct InternalCatalog {
-    dobbydb_schema: Arc<dyn SchemaProvider>
+    information_schema: Arc<dyn SchemaProvider>
 }
 
 impl InternalCatalog {
     pub fn new() -> Self {
         Self {
-            dobbydb_schema: Arc::new(MemorySchemaProvider::new())
+            information_schema: Arc::new(MemorySchemaProvider::new())
         }
     }
 }
@@ -32,12 +32,12 @@ impl CatalogProvider for InternalCatalog {
     }
 
     fn schema_names(&self) -> Vec<String> {
-        vec![String::from(DOBBYDB_SCHEMA_NAME)]
+        vec![String::from(INFORMATION_SCHEMA)]
     }
 
     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        if name == DOBBYDB_SCHEMA_NAME {
-            Some(self.dobbydb_schema.clone())
+        if name == INFORMATION_SCHEMA {
+            Some(self.information_schema.clone())
         } else {
             None
         }

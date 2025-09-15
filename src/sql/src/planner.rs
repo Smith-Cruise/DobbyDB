@@ -9,11 +9,11 @@ use datafusion::physical_plan::{execute_stream, ExecutionPlan};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::sql::TableReference;
 use dobbydb_catalog::df_catalog::{
-    InformationSchemaShowCatalogs, InternalCatalog, CATALOGS_TABLE_NAME, DOBBYDB_SCHEMA_NAME,
+    InformationSchemaShowCatalogs, InternalCatalog, CATALOGS_TABLE_NAME,
     INTERNAL_CATALOG_NAME,
 };
-use std::hash::Hash;
 use std::sync::Arc;
+use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 
 pub struct ExtendedQueryPlanner {
     session_context: SessionContext,
@@ -21,14 +21,9 @@ pub struct ExtendedQueryPlanner {
 
 impl ExtendedQueryPlanner {
     pub fn new() -> Result<Self, DataFusionError> {
-        let session_config = SessionConfig::new().with_information_schema(true);
+        let session_config = SessionConfig::new();
         let session_context = SessionContext::new_with_config(session_config);
         let session_context = Self::register_something(session_context)?;
-        if let Some(catalog) = session_context.catalog("INTERNAL") {
-            if let Some(schema) = catalog.schema("DOBBYDB") {
-                println!("succeed");
-            }
-        }
         Ok(Self { session_context })
     }
 
@@ -48,7 +43,7 @@ impl ExtendedQueryPlanner {
 
         let catalog_table = TableReference::full(
             INTERNAL_CATALOG_NAME,
-            DOBBYDB_SCHEMA_NAME,
+            INFORMATION_SCHEMA,
             CATALOGS_TABLE_NAME,
         );
         session_context.register_table(
@@ -71,7 +66,7 @@ impl ExtendedQueryPlanner {
                 Ok(df.logical_plan().clone())
             }
             ExtendedStatement::ShowCatalogsStatement => {
-                let sql_string = "SELECT * FROM internal.dobbydb.catalogs";
+                let sql_string = "SELECT * FROM internal.information_schema.catalogs";
                 let df = self.session_context.sql(&sql_string).await?;
                 Ok(df.logical_plan().clone())
             }
