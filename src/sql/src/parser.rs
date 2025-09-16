@@ -192,7 +192,10 @@ mod tests {
     use datafusion::arrow;
     use datafusion::prelude::SessionContext;
     use futures::StreamExt;
+    use sqlparser::ast::{ShowStatementOptions, Statement};
+    use sqlparser::ast::Statement::ShowDatabases;
     use crate::planner::ExtendedQueryPlanner;
+    use crate::statements::ExtendedStatement::SQLStatement;
     use super::*;
 
     #[test]
@@ -200,6 +203,25 @@ mod tests {
         let statement = ExtendedParser::parse_sql("show catalogs")?;
         let stmt = &statement[0];
         assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_databases() -> Result<(), DataFusionError> {
+        let statement = ExtendedParser::parse_sql("show databases")?;
+        let stmt = &statement[0];
+        let expected_statement = SQLStatement(Box::new(Statement::ShowDatabases {
+            terse: false,
+            history: false,
+            show_options: ShowStatementOptions{
+                show_in: None,
+                starts_with: None,
+                limit: None,
+                limit_from: None,
+                filter_position: None
+            }
+        }));
+        assert_eq!(expected_statement, *stmt);
         Ok(())
     }
 

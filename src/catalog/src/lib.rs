@@ -1,2 +1,2 @@
 pub mod catalog;
-pub mod df_catalog;
+pub mod internal_catalog;

@@ -10,8 +10,10 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
 use crate::catalog::{get_catalog_manager, CatalogConfig};
 
-pub const INTERNAL_CATALOG_NAME: &str = "internal";
-pub const CATALOGS_TABLE_NAME: &str = "catalogs";
+pub const INTERNAL_CATALOG: &str = "internal";
+pub const INFORMATION_SCHEMA_CATALOGS: &str = "catalogs";
+pub const INFORMATION_SCHEMA_SCHEMAS: &str = "schemas";
+pub const INFORMATION_SCHEMA_TABLES: &str = "tables";
 
 #[derive(Debug)]
 pub struct InternalCatalog {
