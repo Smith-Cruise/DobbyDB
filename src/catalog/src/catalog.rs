@@ -7,6 +7,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+pub trait CatalogConfigTrait: Send + Sync {
+    fn convert_iceberg_config(&self) -> HashMap<String, String>;
+}
+
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {
     hms: Option<Vec<HMSCatalogConfig>>,
@@ -103,7 +107,7 @@ impl CatalogManager {
                     ));
                 }
                 CatalogConfig::GLUE(config) => {
-                    let glue_catalog = GlueCatalog::try_new(config).await?;
+                    let glue_catalog = GlueCatalog::try_new(&Arc::new(config.clone())).await?;
                     catalog_list.register_catalog(key.to_string(), Arc::new(glue_catalog));
                 }
             }

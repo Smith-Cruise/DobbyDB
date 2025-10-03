@@ -2,7 +2,6 @@ mod exec;
 use datafusion::arrow;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::error::DataFusionError;
-use datafusion::physical_plan::streaming::PartitionStream;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::get_catalog_manager;
 use dobbydb_catalog::internal_catalog::{

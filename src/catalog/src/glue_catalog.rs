@@ -15,6 +15,9 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
+use iceberg::io::{S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY};
+use crate::catalog::CatalogConfigTrait;
+use crate::table_format::{try_new_table_format, try_new_table_schema};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlueCatalogConfig {
@@ -33,6 +36,22 @@ pub struct GlueCatalogConfig {
     pub aws_s3_secret_key: Option<String>,
 }
 
+impl CatalogConfigTrait for GlueCatalogConfig {
+    fn convert_iceberg_config(&self) -> HashMap<String, String> {
+        let mut map: HashMap<String, String> = HashMap::new();
+        if let Some(region) = &self.aws_s3_region {
+            map.insert(S3_REGION.into(), region.clone());
+        }
+        if let Some(access_key) = &self.aws_s3_access_key {
+            map.insert(S3_ACCESS_KEY_ID.into(), access_key.clone());
+        }
+        if let Some(secret_key) = &self.aws_s3_secret_key {
+            map.insert(S3_SECRET_ACCESS_KEY.into(), secret_key.clone());
+        }
+        map
+    }
+}
+
 async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
     let mut aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest());
     if let (Some(access_key), Some(secret_key)) =
@@ -45,18 +64,18 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
         aws_config = aws_config.region(Region::new(region.clone()));
     }
     let aws_config = aws_config.load().await;
-    let glue_client = aws_sdk_glue::Client::new(&aws_config);
+    let glue_client = Client::new(&aws_config);
     glue_client
 }
 
 #[derive(Debug)]
 pub struct GlueCatalog {
-    config: GlueCatalogConfig,
+    config: Arc<GlueCatalogConfig>,
     schemas: HashMap<String, Arc<dyn SchemaProvider>>,
 }
 
 impl GlueCatalog {
-    pub async fn try_new(config: &GlueCatalogConfig) -> Result<Self, DataFusionError> {
+    pub async fn try_new(config: &Arc<GlueCatalogConfig>) -> Result<Self, DataFusionError> {
         let glue_client = build_glue_client(config).await;
         let mut schemas: HashMap<String, Arc<dyn SchemaProvider>> = HashMap::new();
         let dbs = glue_client
@@ -91,7 +110,7 @@ impl CatalogProvider for GlueCatalog {
 
 #[derive(Debug)]
 pub struct GlueSchema {
-    config: GlueCatalogConfig,
+    config: Arc<GlueCatalogConfig>,
     schema_name: String,
     table_names: HashSet<String>
 }
@@ -99,7 +118,7 @@ pub struct GlueSchema {
 impl GlueSchema {
     pub async fn try_new(
         glue_client: &Client,
-        config: &GlueCatalogConfig,
+        config: &Arc<GlueCatalogConfig>,
         schema_name: &str,
     ) -> Result<Self, DataFusionError> {
         let mut table_names = HashSet::new();
@@ -150,15 +169,12 @@ impl SchemaProvider for GlueSchema {
             .await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-        match resp.table {
-            Some(glue_table) => {
-                let built_glue_table = GlueTable::try_new(&self.config, &self.schema_name, &glue_table).await?;
-                Ok(Some(Arc::new(built_glue_table)))
-            },
-            None => {
-                Ok(None)
-            }
-        }
+        let glue_table = match resp.table {
+            Some(glue_table) => glue_table,
+            None => return Ok(None)
+        };
+        let built_glue_table = GlueTable::try_new(&self.config, &self.schema_name, &glue_table).await?;
+        Ok(Some(Arc::new(built_glue_table)))
     }
 
     fn table_exist(&self, name: &str) -> bool {
@@ -169,23 +185,31 @@ impl SchemaProvider for GlueSchema {
 #[derive(Debug)]
 pub struct GlueTable {
     table_reference: TableReference,
-    table_schema: Option<SchemaRef>,
-    properties: Option<HashMap<String, String>>,
-    config: GlueCatalogConfig,
+    table_schema: SchemaRef,
+    table_properties: Option<HashMap<String, String>>,
+    config: Arc<GlueCatalogConfig>,
 }
 
 impl GlueTable {
     pub async fn try_new(
-        config: &GlueCatalogConfig,
+        config: &Arc<GlueCatalogConfig>,
         schema_name: &str,
         glue_table: &Table,
     ) -> Result<Self, DataFusionError> {
         let table_reference =
             TableReference::full(config.name.as_str(), schema_name, glue_table.name.as_str());
+        let table_properties = match &glue_table.parameters {
+            Some(parameters) => { parameters.clone() },
+            None => {
+                return Err(DataFusionError::NotImplemented("unsupported glue table".to_string()));
+            }
+        };
+        let table_format = try_new_table_format(&table_reference, &**config, &table_properties).await?;
+        let table_schema = try_new_table_schema(&table_format)?;
         Ok(GlueTable {
             table_reference,
-            table_schema: None,
-            properties: glue_table.parameters.clone(),
+            table_schema,
+            table_properties: glue_table.parameters.clone(),
             config: config.clone(),
         })
     }
@@ -198,7 +222,7 @@ impl TableProvider for GlueTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        todo!()
+        self.table_schema.clone()
     }
 
     fn table_type(&self) -> TableType {

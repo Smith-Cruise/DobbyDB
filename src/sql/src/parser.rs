@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_simple_sql() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("use catalog abc")?;
+        let statement = ExtendedParser::parse_sql("desc a")?;
         match &statement[0] {
             ExtendedStatement::SQLStatement(stmt) => {
                 match stmt.as_ref() {
@@ -237,7 +237,7 @@ mod tests {
                         println!("use {:?}", use_stmt);
                     },
                     _ => {
-                        println!("{}", stmt)
+                        println!("{:?}", stmt)
                     }
                 }
             },

@@ -1,22 +1,47 @@
-use datafusion::common::HashMap;
-use datafusion::error::DataFusionError;
+use std::collections::HashMap;
+use std::sync::Arc;
+use ::iceberg::arrow::schema_to_arrow_schema;
+use datafusion::arrow::datatypes::SchemaRef;
+use crate::catalog::CatalogConfigTrait;
 use crate::constants::ICEBERG_METADATA_LOCATION;
 use crate::table_format::iceberg::IcebergTableFormat;
+use datafusion::error::DataFusionError;
+use datafusion::sql::TableReference;
 
 pub mod iceberg;
 
-
-
 pub enum TableFormat {
     Iceberg(IcebergTableFormat),
-    Invalid
 }
 
-pub fn try_new_table_format(properties: &HashMap<String, String>) -> Result<TableFormat, DataFusionError> {
-    if properties.contains_key(ICEBERG_METADATA_LOCATION) {
+pub async fn try_new_table_format(
+    table_reference: &TableReference,
+    catalog_config: &dyn CatalogConfigTrait,
+    table_properties: &HashMap<String, String>,
+) -> Result<TableFormat, DataFusionError> {
+    if let Some(iceberg_metadata_location) = table_properties.get(ICEBERG_METADATA_LOCATION) {
         // iceberg
-        Ok(TableFormat::Invalid)
+        let iceberg_config = catalog_config.convert_iceberg_config();
+        let iceberg_format = IcebergTableFormat::try_new(
+            table_reference,
+            iceberg_metadata_location,
+            &iceberg_config,
+        )
+        .await?;
+        Ok(TableFormat::Iceberg(iceberg_format))
     } else {
-        Err(DataFusionError::NotImplemented("not implemented table format".to_string()))
+        Err(DataFusionError::NotImplemented(
+            "not implemented table format".to_string(),
+        ))
+    }
+}
+
+pub fn try_new_table_schema(table_format: &TableFormat) -> Result<SchemaRef, DataFusionError> {
+    match table_format {
+        TableFormat::Iceberg(iceberg_table_format) => {
+            let schema = schema_to_arrow_schema(iceberg_table_format.static_table.metadata().current_schema())
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            Ok(Arc::new(schema))
+        }
     }
 }
