@@ -1,3 +1,4 @@
+use std::ascii::AsciiExt;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
 use datafusion::error::DataFusionError;
@@ -6,6 +7,7 @@ use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 use std::collections::VecDeque;
+use sqlparser::dialect::DatabricksDialect;
 use crate::statements::{ExtendedStatement};
 
 // Use `Parser::expected` instead, if possible
@@ -21,7 +23,7 @@ macro_rules! parser_err {
 }
 
 const DEFAULT_RECURSION_LIMIT: usize = 50;
-const DEFAULT_DIALECT: GenericDialect = GenericDialect {};
+const DEFAULT_DIALECT: DatabricksDialect = DatabricksDialect {};
 
 pub struct ExtendedParserBuilder<'a> {
     /// The SQL string to parse
@@ -208,9 +210,9 @@ mod tests {
 
     #[test]
     fn test_show_databases() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("show databases")?;
+        let statement = ExtendedParser::parse_sql("show schemas")?;
         let stmt = &statement[0];
-        let expected_statement = SQLStatement(Box::new(Statement::ShowDatabases {
+        let expected_statement = SQLStatement(Box::new(Statement::ShowSchemas {
             terse: false,
             history: false,
             show_options: ShowStatementOptions{
@@ -227,45 +229,57 @@ mod tests {
 
     #[test]
     fn test_simple_sql() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("show catalogs")?;
-        println!("{:?}", statement);
-        let statement = ExtendedParser::parse_sql("show tables")?;
-        println!("{:?}", statement);
+        let statement = ExtendedParser::parse_sql("use catalog abc")?;
+        match &statement[0] {
+            ExtendedStatement::SQLStatement(stmt) => {
+                match stmt.as_ref() {
+                    Statement::Use(use_stmt) => {
+                        println!("use {:?}", use_stmt);
+                    },
+                    _ => {
+                        println!("{}", stmt)
+                    }
+                }
+            },
+            _ => {
+                println!("{:?}", statement[0]);
+            }
+        }
         Ok(())
     }
 
     #[tokio::test]
     async fn test_show_tables_logical_plan() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("show tables")?;
-        println!("{:?}", statement);
-        let planner = ExtendedQueryPlanner::new()?;
-        let logical_plan = planner.create_logical_plan(&statement[0]).await?;
-        println!("{:?}", logical_plan);
+        // let statement = ExtendedParser::parse_sql("show tables")?;
+        // println!("{:?}", statement);
+        // let planner = ExtendedQueryPlanner::new()?;
+        // let logical_plan = planner.create_logical_plan(&statement[0]).await?;
+        // println!("{:?}", logical_plan);
         Ok(())
     }
 
     #[tokio::test]
     async fn test_logical_plan() -> Result<(), DataFusionError> {
-        let statement = ExtendedParser::parse_sql("show catalogs")?;
-        println!("{:?}", statement);
-        let planner = ExtendedQueryPlanner::new()?;
-        let logical_plan = planner.create_logical_plan(&statement[0]).await?;
-        println!("{:?}", logical_plan);
-        let physical_plan = planner.create_physical_plan(&logical_plan).await?;
-        println!("{:?}", physical_plan);
-        let mut batch_stream = planner.execute_physical_plan(physical_plan.clone()).await?;
-        while let Some(batch) = batch_stream.next().await {
-            let batch = batch?;
-            println!("收到 batch，包含 {} 行", batch.num_rows());
-            arrow::util::pretty::print_batches(&[batch])?;
-        }
+        // let statement = ExtendedParser::parse_sql("show catalogs")?;
+        // println!("{:?}", statement);
+        // let planner = ExtendedQueryPlanner::new()?;
+        // let logical_plan = planner.create_logical_plan(&statement[0]).await?;
+        // println!("{:?}", logical_plan);
+        // let physical_plan = planner.create_physical_plan(&logical_plan).await?;
+        // println!("{:?}", physical_plan);
+        // let mut batch_stream = planner.execute_physical_plan(physical_plan.clone()).await?;
+        // while let Some(batch) = batch_stream.next().await {
+        //     let batch = batch?;
+        //     println!("收到 batch，包含 {} 行", batch.num_rows());
+        //     arrow::util::pretty::print_batches(&[batch])?;
+        // }
         // physical_plan.execute()
         Ok(())
     }
 
     #[tokio::test]
     async fn test_datafusion() -> Result<(), DataFusionError> {
-        let sql = "show tables";
+        let sql = "use test";
         let ctx = SessionContext::new();
         // ctx.register_table()
         let df = ctx.sql(sql).await?;

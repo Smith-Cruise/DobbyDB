@@ -17,6 +17,9 @@ tokio = { version = "1.0", features = ["rt-multi-thread"] }
 serde = { version = "1.0.219", features = ["derive"] }
 toml = "0.9.5"
 futures = "0.3.31"
+async-trait = "0.1.88"
+iceberg = "0.6.0"
+iceberg-datafusion = "0.6.0"
 dobbydb-catalog = { path = "src/catalog" }
 dobbydb-server = { path = "src/server" }
 dobbydb-sql = { path = "src/sql" }

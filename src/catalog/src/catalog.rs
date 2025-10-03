@@ -1,34 +1,16 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
+use crate::hms_catalog::HMSCatalogConfig;
+use datafusion::catalog::{CatalogProvider, CatalogProviderList};
 use datafusion::error::DataFusionError;
+use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
 
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {
-    hms: Vec<HMSCatalogConfig>,
-    glue: Vec<GlueCatalogConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HMSCatalogConfig {
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GlueCatalogConfig {
-    pub name: String,
-    #[serde(rename = "aws-glue-region")]
-    pub aws_glue_region: Option<String>,
-    #[serde(rename = "aws-glue-access-key")]
-    pub aws_glue_access_key: Option<String>,
-    #[serde(rename = "aws-glue-secret-key")]
-    pub aws_glue_secret_key: Option<String>,
-    #[serde(rename = "aws-s3-region")]
-    pub aws_s3_region: Option<String>,
-    #[serde(rename = "aws-s3-access-key")]
-    pub aws_s3_access_key: Option<String>,
-    #[serde(rename = "aws-s3-secret-key")]
-    pub aws_s3_secret_key: Option<String>,
+    hms: Option<Vec<HMSCatalogConfig>>,
+    glue: Option<Vec<GlueCatalogConfig>>,
 }
 
 #[derive(Debug)]
@@ -55,7 +37,7 @@ impl CatalogManager {
         }
     }
 
-    fn insert(
+    fn register_catalog(
         &mut self,
         catalog_name: &str,
         catalog_config: CatalogConfig,
@@ -77,22 +59,55 @@ impl CatalogManager {
         let configs: CatalogConfigs = toml::from_str(&config).map_err(|e| {
             DataFusionError::Configuration(format!("Failed to parse config: {}", e))
         })?;
-        for hms_catalog in &configs.hms {
-            self.insert(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
+
+        match &configs.hms {
+            Some(catalogs) => {
+                for hms_catalog in catalogs {
+                    self.register_catalog(
+                        &hms_catalog.name,
+                        CatalogConfig::HMS(hms_catalog.clone()),
+                    )?;
+                }
+            }
+            _ => {}
         }
 
-        for glue_catalog in &configs.glue {
-            self.insert(
-                &glue_catalog.name,
-                CatalogConfig::GLUE(glue_catalog.clone()),
-            )?;
+        match &configs.glue {
+            Some(catalogs) => {
+                for glue_catalog in catalogs {
+                    self.register_catalog(
+                        &glue_catalog.name,
+                        CatalogConfig::GLUE(glue_catalog.clone()),
+                    )?;
+                }
+            }
+            None => {}
         }
+
         Ok(())
     }
-    
+
     pub fn get_catalogs(&self) -> &HashMap<String, CatalogConfig> {
         &self.catalogs
     }
+
+    pub async fn register_into_catalog_list(
+        &self,
+        catalog_list: Arc<dyn CatalogProviderList>,
+    ) -> Result<(), DataFusionError> {
+        for (key, value) in &self.catalogs {
+            match value {
+                CatalogConfig::HMS(config) => {
+                    return Err(DataFusionError::NotImplemented(
+                        "hms not implemented".to_string(),
+                    ));
+                }
+                CatalogConfig::GLUE(config) => {
+                    let glue_catalog = GlueCatalog::try_new(config).await?;
+                    catalog_list.register_catalog(key.to_string(), Arc::new(glue_catalog));
+                }
+            }
+        }
+        Ok(())
+    }
 }
-
-

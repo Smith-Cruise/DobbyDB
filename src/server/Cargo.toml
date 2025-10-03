@@ -4,6 +4,7 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+rustyline = "17.0"
 datafusion = { workspace = true }
 tokio = { workspace = true }
 dobbydb-catalog = { workspace = true }

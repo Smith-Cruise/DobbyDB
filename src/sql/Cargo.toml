@@ -9,6 +9,6 @@ datafusion = { workspace = true }
 sqlparser = { workspace = true }
 #datafusion-sql = {workspace = true}
 tokio = { workspace = true }
-async-trait = "0.1.88"
+async-trait = { workspace = true }
 futures = { workspace = true }
 dobbydb-catalog = { workspace = true }

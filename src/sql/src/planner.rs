@@ -1,19 +1,17 @@
 use crate::statements::ExtendedStatement;
-use datafusion::catalog::Session;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::streaming::StreamingTable;
+use datafusion::catalog::Session;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::logical_expr::LogicalPlan;
-use datafusion::physical_plan::streaming::PartitionStream;
-use datafusion::physical_plan::{ExecutionPlan, execute_stream};
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder};
+use datafusion::physical_plan::{execute_stream, ExecutionPlan};
+use datafusion::prelude::SessionContext;
 use datafusion::sql::TableReference;
 use dobbydb_catalog::internal_catalog::{
-    INFORMATION_SCHEMA_CATALOGS, INFORMATION_SCHEMA_SCHEMAS, INFORMATION_SCHEMA_TABLES,
-    INTERNAL_CATALOG, InformationSchemaShowCatalogs, InternalCatalog,
+    INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
+    INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG,
 };
-use sqlparser::ast::Statement;
+use sqlparser::ast::{Statement, Use};
 use std::sync::Arc;
 
 struct ScanVirtualTableSqlBuilder {
@@ -56,43 +54,12 @@ impl ScanVirtualTableSqlBuilder {
 }
 
 pub struct ExtendedQueryPlanner {
-    session_context: SessionContext,
+    session_context: Arc<SessionContext>,
 }
 
 impl ExtendedQueryPlanner {
-    pub fn new() -> Result<Self, DataFusionError> {
-        let session_config = SessionConfig::new();
-        let session_context = SessionContext::new_with_config(session_config);
-        let session_context = Self::register_something(session_context)?;
+    pub fn new(session_context: Arc<SessionContext>) -> Result<Self, DataFusionError> {
         Ok(Self { session_context })
-    }
-
-    fn wrap_with_stream_table(
-        table: Arc<dyn PartitionStream>,
-    ) -> Result<StreamingTable, DataFusionError> {
-        Ok(StreamingTable::try_new(
-            Arc::clone(&table.schema()),
-            vec![table],
-        )?)
-    }
-
-    fn register_something(
-        session_context: SessionContext,
-    ) -> Result<SessionContext, DataFusionError> {
-        session_context.register_catalog(INTERNAL_CATALOG, Arc::new(InternalCatalog::new()));
-
-        let catalog_table = TableReference::full(
-            INTERNAL_CATALOG,
-            INFORMATION_SCHEMA,
-            INFORMATION_SCHEMA_TABLES,
-        );
-        session_context.register_table(
-            catalog_table,
-            Arc::new(ExtendedQueryPlanner::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowCatalogs::new()?,
-            ))?),
-        )?;
-        Ok(session_context)
     }
 
     pub async fn create_logical_plan(
@@ -104,17 +71,20 @@ impl ExtendedQueryPlanner {
             ExtendedStatement::ShowCatalogsStatement => {
                 sql_string = Some(
                     ScanVirtualTableSqlBuilder::new_with_table_reference(TableReference::Bare {
-                        table: Arc::from(INFORMATION_SCHEMA_CATALOGS),
+                        table: Arc::from(INFORMATION_SCHEMA_SHOW_CATALOGS),
                     })
                     .build_sql(),
                 );
             }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
+                Statement::Use(use_stmt) => {
+                    return self.handle_use_stmt(&use_stmt).await;
+                }
                 Statement::ShowSchemas { .. } => {
                     sql_string = Some(
                         ScanVirtualTableSqlBuilder::new_with_table_reference(
                             TableReference::Bare {
-                                table: Arc::from(INFORMATION_SCHEMA_SCHEMAS),
+                                table: Arc::from(INFORMATION_SCHEMA_SHOW_SCHEMAS),
                             },
                         )
                         .build_sql(),
@@ -124,7 +94,7 @@ impl ExtendedQueryPlanner {
                     sql_string = Some(String::from(
                         ScanVirtualTableSqlBuilder::new_with_table_reference(
                             TableReference::Bare {
-                                table: Arc::from(INFORMATION_SCHEMA_TABLES),
+                                table: Arc::from(INFORMATION_SCHEMA_SHOW_TABLES),
                             },
                         )
                         .build_sql(),
@@ -163,5 +133,84 @@ impl ExtendedQueryPlanner {
         let task_ctx = self.session_context.task_ctx();
         let batch = execute_stream(physical_plan, task_ctx);
         batch
+    }
+
+    async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<LogicalPlan, DataFusionError> {
+        let (catalog_name, schema_name) = match use_stmt {
+            Use::Object(object_name) => {
+                let object_name_vec = &object_name.0;
+                match object_name_vec.len() {
+                    1 => (
+                        self.session_context
+                            .state()
+                            .config()
+                            .options()
+                            .catalog
+                            .default_catalog
+                            .clone(),
+                        Some(object_name_vec[0].to_string()),
+                    ),
+                    2 => (
+                        object_name_vec[0].to_string(),
+                        Some(object_name_vec[1].to_string()),
+                    ),
+                    _ => {
+                        return Err(DataFusionError::Plan(String::from(format!(
+                            "unsupported use stmt {:?}",
+                            use_stmt
+                        ))));
+                    }
+                }
+            }
+            Use::Catalog(catalog_name) => {
+                let object_name_vec = &catalog_name.0;
+                (object_name_vec[0].to_string(), None)
+            }
+            _ => {
+                return Err(DataFusionError::Plan(String::from(format!(
+                    "unsupported use stmt {:?}",
+                    use_stmt
+                ))));
+            }
+        };
+
+        let catalog_provider = match self.session_context.catalog(&catalog_name) {
+            Some(catalog_provider) => catalog_provider,
+            None => {
+                return Err(DataFusionError::Plan(String::from(format!(
+                    "unknown catalog {}",
+                    catalog_name
+                ))));
+            }
+        };
+
+        let state = self.session_context.state_ref();
+        state
+            .write()
+            .config_mut()
+            .options_mut()
+            .catalog
+            .default_catalog = catalog_name.clone();
+
+        if let Some(schema_name) = schema_name {
+            match catalog_provider.schema(&schema_name) {
+                None => {
+                    return Err(DataFusionError::Plan(String::from(format!(
+                        "unknown schema {}",
+                        schema_name
+                    ))));
+                }
+                _ => {}
+            }
+
+            state
+                .write()
+                .config_mut()
+                .options_mut()
+                .catalog
+                .default_schema = schema_name.clone();
+        }
+
+        Ok(LogicalPlanBuilder::empty(false).build()?)
     }
 }

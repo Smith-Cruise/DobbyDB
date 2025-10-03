@@ -1,30 +1,68 @@
-use std::any::Any;
-use std::sync::Arc;
+use crate::catalog::{get_catalog_manager, CatalogConfig};
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion::catalog::{CatalogProvider, MemorySchemaProvider, SchemaProvider};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
+use datafusion::catalog::streaming::StreamingTable;
+use datafusion::catalog::{
+    CatalogProvider, CatalogProviderList, MemoryCatalogProviderList, MemorySchemaProvider,
+    SchemaProvider,
+};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
-use crate::catalog::{get_catalog_manager, CatalogConfig};
+use datafusion::physical_plan::EmptyRecordBatchStream;
+use std::any::Any;
+use std::sync::Arc;
+use tokio::runtime::Handle;
 
 pub const INTERNAL_CATALOG: &str = "internal";
-pub const INFORMATION_SCHEMA_CATALOGS: &str = "catalogs";
-pub const INFORMATION_SCHEMA_SCHEMAS: &str = "schemas";
-pub const INFORMATION_SCHEMA_TABLES: &str = "tables";
+pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
+pub const INFORMATION_SCHEMA_SHOW_SCHEMAS: &str = "schemas";
+pub const INFORMATION_SCHEMA_SHOW_TABLES: &str = "tables";
 
 #[derive(Debug)]
 pub struct InternalCatalog {
-    information_schema: Arc<dyn SchemaProvider>
+    information_schema: Arc<dyn SchemaProvider>,
 }
 
 impl InternalCatalog {
-    pub fn new() -> Self {
-        Self {
-            information_schema: Arc::new(MemorySchemaProvider::new())
-        }
+    pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self, DataFusionError> {
+        let information_schema = Arc::new(MemorySchemaProvider::new());
+
+        // show catalogs
+        information_schema.register_table(
+            INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
+            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+                InformationSchemaShowCatalogs::new(),
+            ))?),
+        )?;
+
+        // show schemas
+        information_schema.register_table(
+            INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
+            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+                InformationSchemaShowSchemas::new(catalog_provider_list.clone()),
+            ))?),
+        )?;
+
+        // show tables
+        information_schema.register_table(
+            INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
+            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+                InformationSchemaShowTables::new(catalog_provider_list.clone()),
+            ))?),
+        )?;
+        Ok(Self { information_schema })
+    }
+
+    fn wrap_with_stream_table(
+        table: Arc<dyn PartitionStream>,
+    ) -> Result<StreamingTable, DataFusionError> {
+        Ok(StreamingTable::try_new(
+            Arc::clone(&table.schema()),
+            vec![table],
+        )?)
     }
 }
 
@@ -52,17 +90,14 @@ pub struct InformationSchemaShowCatalogs {
 }
 
 impl InformationSchemaShowCatalogs {
-    pub fn new() -> Result<InformationSchemaShowCatalogs, DataFusionError> {
+    pub fn new() -> Self {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("catalog_name", DataType::Utf8, false),
             Field::new("catalog_type", DataType::Utf8, false),
-            Field::new("catalog_configs", DataType::Utf8, false),
+            Field::new("catalog_config", DataType::Utf8, false),
         ]));
 
-        let information_schema_catalogs = InformationSchemaShowCatalogs {
-            schema: schema.clone(),
-        };
-        Ok(information_schema_catalogs)
+        InformationSchemaShowCatalogs { schema }
     }
 }
 
@@ -72,7 +107,6 @@ impl PartitionStream for InformationSchemaShowCatalogs {
     }
 
     fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-
         let mut catalog_name_builder = StringBuilder::new();
         let mut catalog_type_builder = StringBuilder::new();
         let mut catalog_configs_builder = StringBuilder::new();
@@ -84,21 +118,154 @@ impl PartitionStream for InformationSchemaShowCatalogs {
                 CatalogConfig::HMS(hms_catalog) => {
                     catalog_type_builder.append_value("HMS");
                     catalog_configs_builder.append_value(format!("{:?}", hms_catalog));
-                },
+                }
                 CatalogConfig::GLUE(glue_catalog) => {
                     catalog_type_builder.append_value("GLUE");
                     catalog_configs_builder.append_value(format!("{:?}", glue_catalog));
                 }
             }
-
         }
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
                 Arc::new(catalog_name_builder.finish()),
                 Arc::new(catalog_type_builder.finish()),
-                Arc::new(catalog_configs_builder.finish())
+                Arc::new(catalog_configs_builder.finish()),
             ],
+        )
+        .unwrap();
+        Box::pin(RecordBatchStreamAdapter::new(
+            Arc::clone(&self.schema),
+            futures::stream::once(async move { Ok(batch) }),
+        ))
+    }
+}
+
+#[derive(Debug)]
+pub struct InformationSchemaShowSchemas {
+    catalog_provider_list: Arc<dyn CatalogProviderList>,
+    schema: SchemaRef,
+}
+
+impl InformationSchemaShowSchemas {
+    pub fn new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Self {
+        let schema: SchemaRef = Arc::new(Schema::new(vec![Field::new(
+            "schema_name",
+            DataType::Utf8,
+            false,
+        )]));
+
+        InformationSchemaShowSchemas { catalog_provider_list, schema }
+    }
+}
+
+impl PartitionStream for InformationSchemaShowSchemas {
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+        let catalog = &ctx.session_config().options().catalog;
+        let default_catalog = &catalog.default_catalog;
+
+
+
+        let catalog_provider = match self.catalog_provider_list.catalog(default_catalog) {
+            Some(catalog_provider) => catalog_provider,
+            None => {
+                // catalog not found
+                let error = DataFusionError::Execution(
+                    format!("Catalog '{}' not found", default_catalog)
+                );
+                return Box::pin(RecordBatchStreamAdapter::new(
+                    Arc::clone(&self.schema),
+                    futures::stream::once(async move {
+                        Err(error)
+                    })));
+            }
+        };
+
+        let mut schema_name_builder = StringBuilder::new();
+        for schema_name in &catalog_provider.schema_names() {
+            schema_name_builder.append_value(schema_name.clone());
+        }
+        let batch = RecordBatch::try_new(
+            Arc::clone(&self.schema),
+            vec![Arc::new(schema_name_builder.finish())],
+        )
+        .unwrap();
+        Box::pin(RecordBatchStreamAdapter::new(
+            Arc::clone(&self.schema),
+            futures::stream::once(async move { Ok(batch) }),
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct InformationSchemaShowTables {
+    catalog_provider_list: Arc<dyn CatalogProviderList>,
+    schema: SchemaRef,
+}
+
+impl InformationSchemaShowTables {
+    pub fn new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Self {
+        let schema: SchemaRef = Arc::new(Schema::new(vec![Field::new(
+            "table_name",
+            DataType::Utf8,
+            false,
+        )]));
+
+        InformationSchemaShowTables { catalog_provider_list, schema }
+    }
+}
+
+impl PartitionStream for InformationSchemaShowTables {
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+        let catalog = &ctx.session_config().options().catalog;
+        let default_catalog = &catalog.default_catalog;
+        let default_schema = &catalog.default_schema;
+
+        let catalog_provider = match self.catalog_provider_list.catalog(default_catalog) {
+            Some(catalog_provider) => catalog_provider,
+            None => {
+                // catalog not found
+                let error = DataFusionError::Execution(
+                    format!("Catalog '{}' not found", default_catalog)
+                );
+                return Box::pin(RecordBatchStreamAdapter::new(
+                    Arc::clone(&self.schema),
+                    futures::stream::once(async move {
+                        Err(error)
+                    })));
+            }
+        };
+
+        let schema_provider = match catalog_provider.schema(default_schema) {
+            Some(schema_provider) => schema_provider,
+            None => {
+                // schema not found
+                let error = DataFusionError::Execution(
+                    format!("Schema '{}.{}' not found", default_catalog, default_schema)
+                );
+                return Box::pin(RecordBatchStreamAdapter::new(
+                    Arc::clone(&self.schema),
+                    futures::stream::once(async move {
+                        Err(error)
+                    })));
+            }
+        };
+
+        let mut table_name_builder = StringBuilder::new();
+        for schema_name in &schema_provider.table_names() {
+            table_name_builder.append_value(schema_name.clone());
+        }
+        let batch = RecordBatch::try_new(
+            Arc::clone(&self.schema),
+            vec![Arc::new(table_name_builder.finish())],
         ).unwrap();
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&self.schema),
