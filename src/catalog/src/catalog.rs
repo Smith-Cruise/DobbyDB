@@ -1,9 +1,8 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::HMSCatalogConfig;
-use datafusion::catalog::{CatalogProvider, CatalogProviderList};
+use datafusion::catalog::CatalogProviderList;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -101,7 +100,7 @@ impl CatalogManager {
     ) -> Result<(), DataFusionError> {
         for (key, value) in &self.catalogs {
             match value {
-                CatalogConfig::HMS(config) => {
+                CatalogConfig::HMS(_config) => {
                     return Err(DataFusionError::NotImplemented(
                         "hms not implemented".to_string(),
                     ));

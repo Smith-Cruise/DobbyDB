@@ -4,14 +4,13 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
+aws-sdk-glue = "1.122.0"
+aws-config = "1.8.7"
 serde = { workspace = true }
 datafusion = { workspace = true }
 toml = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
-aws-sdk-glue = "1.121.0"
-aws-config = "1.8.6"
 iceberg = { workspace = true }
 iceberg-datafusion = { workspace = true }
 tokio = { workspace = true }
-log = "0.4.27"

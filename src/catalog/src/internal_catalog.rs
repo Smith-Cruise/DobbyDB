@@ -4,17 +4,15 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::catalog::{
-    CatalogProvider, CatalogProviderList, MemoryCatalogProviderList, MemorySchemaProvider,
+    CatalogProvider, CatalogProviderList, MemorySchemaProvider,
     SchemaProvider,
 };
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
-use datafusion::physical_plan::EmptyRecordBatchStream;
 use std::any::Any;
 use std::sync::Arc;
-use tokio::runtime::Handle;
 
 pub const INTERNAL_CATALOG: &str = "internal";
 pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
@@ -27,7 +25,9 @@ pub struct InternalCatalog {
 }
 
 impl InternalCatalog {
-    pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self, DataFusionError> {
+    pub async fn try_new(
+        catalog_provider_list: Arc<dyn CatalogProviderList>,
+    ) -> Result<Self, DataFusionError> {
         let information_schema = Arc::new(MemorySchemaProvider::new());
 
         // show catalogs
@@ -155,7 +155,10 @@ impl InformationSchemaShowSchemas {
             false,
         )]));
 
-        InformationSchemaShowSchemas { catalog_provider_list, schema }
+        InformationSchemaShowSchemas {
+            catalog_provider_list,
+            schema,
+        }
     }
 }
 
@@ -168,20 +171,16 @@ impl PartitionStream for InformationSchemaShowSchemas {
         let catalog = &ctx.session_config().options().catalog;
         let default_catalog = &catalog.default_catalog;
 
-
-
         let catalog_provider = match self.catalog_provider_list.catalog(default_catalog) {
             Some(catalog_provider) => catalog_provider,
             None => {
                 // catalog not found
-                let error = DataFusionError::Execution(
-                    format!("Catalog '{}' not found", default_catalog)
-                );
+                let error =
+                    DataFusionError::Execution(format!("Catalog '{}' not found", default_catalog));
                 return Box::pin(RecordBatchStreamAdapter::new(
                     Arc::clone(&self.schema),
-                    futures::stream::once(async move {
-                        Err(error)
-                    })));
+                    futures::stream::once(async move { Err(error) }),
+                ));
             }
         };
 
@@ -215,7 +214,10 @@ impl InformationSchemaShowTables {
             false,
         )]));
 
-        InformationSchemaShowTables { catalog_provider_list, schema }
+        InformationSchemaShowTables {
+            catalog_provider_list,
+            schema,
+        }
     }
 }
 
@@ -233,14 +235,12 @@ impl PartitionStream for InformationSchemaShowTables {
             Some(catalog_provider) => catalog_provider,
             None => {
                 // catalog not found
-                let error = DataFusionError::Execution(
-                    format!("Catalog '{}' not found", default_catalog)
-                );
+                let error =
+                    DataFusionError::Execution(format!("Catalog '{}' not found", default_catalog));
                 return Box::pin(RecordBatchStreamAdapter::new(
                     Arc::clone(&self.schema),
-                    futures::stream::once(async move {
-                        Err(error)
-                    })));
+                    futures::stream::once(async move { Err(error) }),
+                ));
             }
         };
 
@@ -248,14 +248,14 @@ impl PartitionStream for InformationSchemaShowTables {
             Some(schema_provider) => schema_provider,
             None => {
                 // schema not found
-                let error = DataFusionError::Execution(
-                    format!("Schema '{}.{}' not found", default_catalog, default_schema)
-                );
+                let error = DataFusionError::Execution(format!(
+                    "Schema '{}.{}' not found",
+                    default_catalog, default_schema
+                ));
                 return Box::pin(RecordBatchStreamAdapter::new(
                     Arc::clone(&self.schema),
-                    futures::stream::once(async move {
-                        Err(error)
-                    })));
+                    futures::stream::once(async move { Err(error) }),
+                ));
             }
         };
 
@@ -266,7 +266,8 @@ impl PartitionStream for InformationSchemaShowTables {
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![Arc::new(table_name_builder.finish())],
-        ).unwrap();
+        )
+        .unwrap();
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&self.schema),
             futures::stream::once(async move { Ok(batch) }),

@@ -4,10 +4,8 @@ version = { workspace = true }
 edition = { workspace = true }
 
 [dependencies]
-#arrow-schema = "56.1.0"
 datafusion = { workspace = true }
 sqlparser = { workspace = true }
-#datafusion-sql = {workspace = true}
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
