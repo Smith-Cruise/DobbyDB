@@ -1,3 +1,6 @@
+use crate::catalog::CatalogConfigTrait;
+use crate::table_format::iceberg::scan::IcebergTableScan;
+use crate::table_format::{try_new_table_format, try_new_table_schema, TableFormat};
 use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_glue::config::Credentials;
@@ -8,16 +11,14 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, Session, TableProvide
 use datafusion::common::TableReference;
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
+use iceberg::io::{S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY};
-use crate::catalog::CatalogConfigTrait;
-use crate::table_format::{try_new_table_format, try_new_table_schema};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlueCatalogConfig {
@@ -112,7 +113,7 @@ impl CatalogProvider for GlueCatalog {
 pub struct GlueSchema {
     config: Arc<GlueCatalogConfig>,
     schema_name: String,
-    table_names: HashSet<String>
+    table_names: HashSet<String>,
 }
 
 impl GlueSchema {
@@ -171,9 +172,10 @@ impl SchemaProvider for GlueSchema {
 
         let glue_table = match resp.table {
             Some(glue_table) => glue_table,
-            None => return Ok(None)
+            None => return Ok(None),
         };
-        let built_glue_table = GlueTable::try_new(&self.config, &self.schema_name, &glue_table).await?;
+        let built_glue_table =
+            GlueTable::try_new(&self.config, &self.schema_name, &glue_table).await?;
         Ok(Some(Arc::new(built_glue_table)))
     }
 
@@ -188,6 +190,7 @@ pub struct GlueTable {
     table_schema: SchemaRef,
     _table_properties: Option<HashMap<String, String>>,
     _config: Arc<GlueCatalogConfig>,
+    table_format: TableFormat,
 }
 
 impl GlueTable {
@@ -199,18 +202,22 @@ impl GlueTable {
         let table_reference =
             TableReference::full(config.name.as_str(), schema_name, glue_table.name.as_str());
         let table_properties = match &glue_table.parameters {
-            Some(parameters) => { parameters.clone() },
+            Some(parameters) => parameters.clone(),
             None => {
-                return Err(DataFusionError::NotImplemented("unsupported glue table".to_string()));
+                return Err(DataFusionError::NotImplemented(
+                    "unsupported glue table".to_string(),
+                ));
             }
         };
-        let table_format = try_new_table_format(&table_reference, &**config, &table_properties).await?;
+        let table_format =
+            try_new_table_format(&table_reference, &**config, &table_properties).await?;
         let table_schema = try_new_table_schema(&table_format)?;
         Ok(GlueTable {
             _table_reference: table_reference,
             table_schema,
             _table_properties: glue_table.parameters.clone(),
             _config: config.clone(),
+            table_format,
         })
     }
 }
@@ -232,10 +239,34 @@ impl TableProvider for GlueTable {
     async fn scan(
         &self,
         _state: &dyn Session,
-        _projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
         _limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        todo!()
+        match &self.table_format {
+            TableFormat::Iceberg(iceberg_table_format) => {
+                let iceberg_table = iceberg_table_format.static_table.clone().into_table();
+                let snapshot_id = iceberg_table.metadata().current_snapshot_id();
+                Ok(Arc::new(IcebergTableScan::new(
+                    iceberg_table,
+                    snapshot_id,
+                    self.table_schema.clone(),
+                    projection,
+                    filters,
+                )))
+            }
+        }
+    }
+
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
+        match &self.table_format {
+            TableFormat::Iceberg(_) => {
+                // Push down all filters, as a single source of truth, the scanner will drop the filters which couldn't be push down
+                Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
+            }
+        }
     }
 }

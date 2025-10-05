@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub mod iceberg;
 
+#[derive(Debug)]
 pub(crate) enum TableFormat {
     Iceberg(IcebergTableFormat),
 }

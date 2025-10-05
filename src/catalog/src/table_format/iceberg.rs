@@ -5,6 +5,10 @@ use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
 use std::collections::HashMap;
 
+pub mod scan;
+pub mod expr_to_predicate;
+
+#[derive(Debug)]
 pub(crate) struct IcebergTableFormat {
     pub(crate) static_table: StaticTable,
 }
