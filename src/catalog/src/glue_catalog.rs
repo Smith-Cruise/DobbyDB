@@ -70,7 +70,7 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
 
 #[derive(Debug)]
 pub struct GlueCatalog {
-    config: Arc<GlueCatalogConfig>,
+    _config: Arc<GlueCatalogConfig>,
     schemas: HashMap<String, Arc<dyn SchemaProvider>>,
 }
 
@@ -88,7 +88,7 @@ impl GlueCatalog {
             schemas.insert(database.name.clone(), Arc::new(glue_schema));
         }
         Ok(GlueCatalog {
-            config: config.clone(),
+            _config: config.clone(),
             schemas,
         })
     }
@@ -184,10 +184,10 @@ impl SchemaProvider for GlueSchema {
 
 #[derive(Debug)]
 pub struct GlueTable {
-    table_reference: TableReference,
+    _table_reference: TableReference,
     table_schema: SchemaRef,
-    table_properties: Option<HashMap<String, String>>,
-    config: Arc<GlueCatalogConfig>,
+    _table_properties: Option<HashMap<String, String>>,
+    _config: Arc<GlueCatalogConfig>,
 }
 
 impl GlueTable {
@@ -207,10 +207,10 @@ impl GlueTable {
         let table_format = try_new_table_format(&table_reference, &**config, &table_properties).await?;
         let table_schema = try_new_table_schema(&table_format)?;
         Ok(GlueTable {
-            table_reference,
+            _table_reference: table_reference,
             table_schema,
-            table_properties: glue_table.parameters.clone(),
-            config: config.clone(),
+            _table_properties: glue_table.parameters.clone(),
+            _config: config.clone(),
         })
     }
 }
@@ -231,10 +231,10 @@ impl TableProvider for GlueTable {
 
     async fn scan(
         &self,
-        state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
+        _state: &dyn Session,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         todo!()
     }

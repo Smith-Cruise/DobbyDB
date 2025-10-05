@@ -1,14 +1,13 @@
-use std::ascii::AsciiExt;
+use crate::statements::ExtendedStatement;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::sqlparser::dialect::{Dialect, GenericDialect};
+use datafusion::logical_expr::sqlparser::dialect::Dialect;
 use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
-use std::collections::VecDeque;
 use sqlparser::dialect::DatabricksDialect;
-use crate::statements::{ExtendedStatement};
+use std::collections::VecDeque;
 
 // Use `Parser::expected` instead, if possible
 macro_rules! parser_err {
@@ -98,11 +97,7 @@ impl<'a> ExtendedParser<'a> {
         Ok(stmts)
     }
 
-    fn expected<T>(
-        &self,
-        expected: &str,
-        found: TokenWithSpan,
-    ) -> Result<T, DataFusionError> {
+    fn expected<T>(&self, expected: &str, found: TokenWithSpan) -> Result<T, DataFusionError> {
         let sql_parser_span = found.span;
         let span = Span::try_from_sqlparser_span(sql_parser_span);
         let diagnostic = Diagnostic::new_error(
@@ -156,19 +151,20 @@ impl<'a> ExtendedParser<'a> {
     }
 
     fn parse_show(&mut self) -> Result<ExtendedStatement, DataFusionError> {
-        if let token = self.parser.peek_token() {
-            match &token.token {
-                Token::Word(w) => {
-                    let val = w.value.to_ascii_uppercase();
-                    if val == "CATALOGS" {
-                        self.parser.advance_token();
-                        return Ok(ExtendedStatement::ShowCatalogsStatement);
-                    }
-                },
-                _ => {}
+        let token = self.parser.peek_token();
+        match &token.token {
+            Token::Word(w) => {
+                let val = w.value.to_ascii_uppercase();
+                if val == "CATALOGS" {
+                    self.parser.advance_token();
+                    return Ok(ExtendedStatement::ShowCatalogsStatement);
+                }
             }
-        }
-        Ok(ExtendedStatement::SQLStatement(Box::from(self.parser.parse_show()?)))
+            _ => {}
+        };
+        Ok(ExtendedStatement::SQLStatement(Box::from(
+            self.parser.parse_show()?,
+        )))
     }
 
     /// Helper method to parse a statement and handle errors consistently, especially for recursion limits
@@ -191,14 +187,10 @@ impl<'a> ExtendedParser<'a> {
 
 #[cfg(test)]
 mod tests {
-    use datafusion::arrow;
-    use datafusion::prelude::SessionContext;
-    use futures::StreamExt;
-    use sqlparser::ast::{ShowStatementOptions, Statement};
-    use sqlparser::ast::Statement::ShowDatabases;
-    use crate::planner::ExtendedQueryPlanner;
-    use crate::statements::ExtendedStatement::SQLStatement;
     use super::*;
+    use crate::statements::ExtendedStatement::SQLStatement;
+    use datafusion::prelude::SessionContext;
+    use sqlparser::ast::{ShowStatementOptions, Statement};
 
     #[test]
     fn test_show_catalogs() -> Result<(), DataFusionError> {
@@ -215,13 +207,13 @@ mod tests {
         let expected_statement = SQLStatement(Box::new(Statement::ShowSchemas {
             terse: false,
             history: false,
-            show_options: ShowStatementOptions{
+            show_options: ShowStatementOptions {
                 show_in: None,
                 starts_with: None,
                 limit: None,
                 limit_from: None,
-                filter_position: None
-            }
+                filter_position: None,
+            },
         }));
         assert_eq!(expected_statement, *stmt);
         Ok(())
@@ -231,14 +223,12 @@ mod tests {
     fn test_simple_sql() -> Result<(), DataFusionError> {
         let statement = ExtendedParser::parse_sql("desc a")?;
         match &statement[0] {
-            ExtendedStatement::SQLStatement(stmt) => {
-                match stmt.as_ref() {
-                    Statement::Use(use_stmt) => {
-                        println!("use {:?}", use_stmt);
-                    },
-                    _ => {
-                        println!("{:?}", stmt)
-                    }
+            ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
+                Statement::Use(use_stmt) => {
+                    println!("use {:?}", use_stmt);
+                }
+                _ => {
+                    println!("{:?}", stmt)
                 }
             },
             _ => {

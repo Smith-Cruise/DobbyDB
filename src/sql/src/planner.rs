@@ -1,6 +1,5 @@
 use crate::statements::ExtendedStatement;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::Session;
 use datafusion::error::DataFusionError;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder};
@@ -66,7 +65,7 @@ impl ExtendedQueryPlanner {
         &self,
         statement: &ExtendedStatement,
     ) -> Result<LogicalPlan, DataFusionError> {
-        let mut sql_string: Option<String> = None;
+        let sql_string: Option<String>;
         match statement {
             ExtendedStatement::ShowCatalogsStatement => {
                 sql_string = Some(

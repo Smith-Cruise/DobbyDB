@@ -5,8 +5,8 @@ use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
 use std::collections::HashMap;
 
-pub struct IcebergTableFormat {
-    pub static_table: StaticTable,
+pub(crate) struct IcebergTableFormat {
+    pub(crate) static_table: StaticTable,
 }
 
 impl IcebergTableFormat {
@@ -19,7 +19,7 @@ impl IcebergTableFormat {
         let table_name: String;
         match table_reference {
             TableReference::Full {
-                catalog,
+                catalog: _,
                 schema,
                 table,
             } => {

@@ -34,7 +34,7 @@ impl InternalCatalog {
         information_schema.register_table(
             INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
             Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowCatalogs::new(),
+                InformationSchemaShowCatalogs::new(catalog_provider_list.clone()),
             ))?),
         )?;
 
@@ -86,18 +86,20 @@ impl CatalogProvider for InternalCatalog {
 
 #[derive(Debug)]
 pub struct InformationSchemaShowCatalogs {
+    catalog_provider_list: Arc<dyn CatalogProviderList>,
     schema: SchemaRef,
+
 }
 
 impl InformationSchemaShowCatalogs {
-    pub fn new() -> Self {
+    pub fn new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Self {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("catalog_name", DataType::Utf8, false),
             Field::new("catalog_type", DataType::Utf8, false),
-            Field::new("catalog_config", DataType::Utf8, false),
+            Field::new("catalog_config", DataType::Utf8, true),
         ]));
 
-        InformationSchemaShowCatalogs { schema }
+        InformationSchemaShowCatalogs { catalog_provider_list, schema }
     }
 }
 
@@ -106,15 +108,34 @@ impl PartitionStream for InformationSchemaShowCatalogs {
         &self.schema
     }
 
-    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+    fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
         let mut catalog_name_builder = StringBuilder::new();
         let mut catalog_type_builder = StringBuilder::new();
         let mut catalog_configs_builder = StringBuilder::new();
 
         let catalog_manager = get_catalog_manager().read().unwrap();
-        for (key, value) in catalog_manager.get_catalogs() {
-            catalog_name_builder.append_value(key.clone());
-            match value {
+        let all_catalog_names = self.catalog_provider_list.catalog_names();
+        for catalog_name in &all_catalog_names {
+            catalog_name_builder.append_value(catalog_name);
+            if catalog_name == INTERNAL_CATALOG {
+                catalog_type_builder.append_value("INTERNAL");
+                catalog_configs_builder.append_null();
+                continue;
+            }
+
+            let catalog_config = catalog_manager.get_catalog(catalog_name);
+            let catalog_config = match catalog_config {
+                Some(config) => config,
+                None => {
+                    let error = DataFusionError::Internal(format!("catalog {} not found", catalog_name));
+                    return Box::pin(RecordBatchStreamAdapter::new(
+                        Arc::clone(&self.schema),
+                        futures::stream::once(async move { Err(error) }),
+                    ));
+                },
+            };
+
+            match catalog_config {
                 CatalogConfig::HMS(hms_catalog) => {
                     catalog_type_builder.append_value("HMS");
                     catalog_configs_builder.append_value(format!("{:?}", hms_catalog));
@@ -125,15 +146,23 @@ impl PartitionStream for InformationSchemaShowCatalogs {
                 }
             }
         }
-        let batch = RecordBatch::try_new(
+        let batch = match RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
                 Arc::new(catalog_name_builder.finish()),
                 Arc::new(catalog_type_builder.finish()),
                 Arc::new(catalog_configs_builder.finish()),
             ],
-        )
-        .unwrap();
+        ) {
+            Ok(record_batch) => record_batch,
+            Err(error) => {
+                let error = DataFusionError::External(Box::new(error));
+                return Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), futures::stream::once(
+                    async move { Err(error) },
+                )));
+            }
+        };
+
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&self.schema),
             futures::stream::once(async move { Ok(batch) }),

@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use crate::DobbyDBServer;
 use datafusion::error::DataFusionError;
 use datafusion::prelude::SessionContext;
-use rustyline::{DefaultEditor, Editor};
 use rustyline::error::ReadlineError;
-use crate::DobbyDBServer;
+use rustyline::DefaultEditor;
+use std::sync::Arc;
 
 /// run and execute SQL statements and commands against a context with the given print options
 pub async fn exec_from_repl(

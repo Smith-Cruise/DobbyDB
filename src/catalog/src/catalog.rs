@@ -89,12 +89,12 @@ impl CatalogManager {
 
         Ok(())
     }
-
-    pub fn get_catalogs(&self) -> &HashMap<String, CatalogConfig> {
-        &self.catalogs
+    
+    pub fn get_catalog(&self, catalog_name: &str) -> Option<&CatalogConfig> {
+        self.catalogs.get(catalog_name)
     }
 
-    pub async fn register_into_catalog_list(
+    pub async fn register_into_catalog_provider_list(
         &self,
         catalog_list: Arc<dyn CatalogProviderList>,
     ) -> Result<(), DataFusionError> {

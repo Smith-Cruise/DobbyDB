@@ -64,7 +64,7 @@ impl DobbyDBServer {
 
         let catalog_manager = get_catalog_manager().read().unwrap();
         catalog_manager
-            .register_into_catalog_list(memory_catalog_provider_list.clone())
+            .register_into_catalog_provider_list(memory_catalog_provider_list.clone())
             .await?;
 
         // load internal catalog
