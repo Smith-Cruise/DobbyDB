@@ -1,18 +1,13 @@
 use crate::catalog::CatalogConfigTrait;
-use crate::table_format::iceberg::scan::IcebergTableScan;
-use crate::table_format::{try_new_table_format, try_new_table_schema, TableFormat};
+use crate::table_format::table_provider_factory::TableProviderFactory;
 use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_glue::config::Credentials;
-use aws_sdk_glue::types::Table;
 use aws_sdk_glue::Client;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::catalog::{CatalogProvider, SchemaProvider, Session, TableProvider};
+use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::TableReference;
-use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_plan::ExecutionPlan;
+use iceberg::inspect::MetadataTableType;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -157,7 +152,20 @@ impl SchemaProvider for GlueSchema {
         &self,
         tbl_name: &str,
     ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        if !self.table_exist(tbl_name) {
+        let table_name: &str;
+        let metadata_table_name: Option<&str>;
+        match tbl_name.split_once("$") {
+            Some((tmp_table_name, tmp_metadata_table_name)) => {
+                table_name = tmp_table_name;
+                metadata_table_name = Some(tmp_metadata_table_name);
+            }
+            None => {
+                table_name = tbl_name;
+                metadata_table_name = None;
+            }
+        }
+
+        if !self.table_exist(table_name) {
             return Ok(None);
         }
 
@@ -165,7 +173,7 @@ impl SchemaProvider for GlueSchema {
         let resp = glue_client
             .get_table()
             .database_name(&self.schema_name)
-            .name(tbl_name)
+            .name(table_name)
             .send()
             .await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
@@ -174,99 +182,36 @@ impl SchemaProvider for GlueSchema {
             Some(glue_table) => glue_table,
             None => return Ok(None),
         };
-        let built_glue_table =
-            GlueTable::try_new(&self.config, &self.schema_name, &glue_table).await?;
-        Ok(Some(Arc::new(built_glue_table)))
-    }
 
-    fn table_exist(&self, name: &str) -> bool {
-        self.table_names.contains(name)
-    }
-}
-
-#[derive(Debug)]
-pub struct GlueTable {
-    _table_reference: TableReference,
-    table_schema: SchemaRef,
-    _table_properties: Option<HashMap<String, String>>,
-    _config: Arc<GlueCatalogConfig>,
-    table_format: TableFormat,
-}
-
-impl GlueTable {
-    pub async fn try_new(
-        config: &Arc<GlueCatalogConfig>,
-        schema_name: &str,
-        glue_table: &Table,
-    ) -> Result<Self, DataFusionError> {
-        let table_reference =
-            TableReference::full(config.name.as_str(), schema_name, glue_table.name.as_str());
-        let table_properties = match &glue_table.parameters {
-            Some(parameters) => parameters.clone(),
+        let table_reference = TableReference::full(
+            self.config.name.as_str(),
+            self.schema_name.as_str(),
+            glue_table.name.as_str(),
+        );
+        let glue_table_properties = match &glue_table.parameters {
+            Some(parameters) => parameters,
             None => {
-                return Err(DataFusionError::NotImplemented(
-                    "unsupported glue table".to_string(),
+                return Err(DataFusionError::Internal(
+                    "glue table's parameters are missing".to_string(),
                 ));
             }
         };
-        let table_format =
-            try_new_table_format(&table_reference, &**config, &table_properties).await?;
-        let table_schema = try_new_table_schema(&table_format)?;
-        Ok(GlueTable {
-            _table_reference: table_reference,
-            table_schema,
-            _table_properties: glue_table.parameters.clone(),
-            _config: config.clone(),
-            table_format,
-        })
-    }
-}
-
-#[async_trait]
-impl TableProvider for GlueTable {
-    fn as_any(&self) -> &dyn Any {
-        self
+        let table_provider = TableProviderFactory::try_new_table_provider(
+            &table_reference,
+            metadata_table_name,
+            glue_table_properties,
+            &*self.config,
+        )
+        .await?;
+        Ok(Some(table_provider))
     }
 
-    fn schema(&self) -> SchemaRef {
-        self.table_schema.clone()
-    }
-
-    fn table_type(&self) -> TableType {
-        TableType::Base
-    }
-
-    async fn scan(
-        &self,
-        _state: &dyn Session,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        _limit: Option<usize>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        match &self.table_format {
-            TableFormat::Iceberg(iceberg_table_format) => {
-                let iceberg_table = iceberg_table_format.static_table.clone().into_table();
-                let snapshot_id = iceberg_table.metadata().current_snapshot_id();
-                Ok(Arc::new(IcebergTableScan::new(
-                    iceberg_table,
-                    snapshot_id,
-                    self.table_schema.clone(),
-                    projection,
-                    filters,
-                )))
-            }
-        }
-    }
-
-    fn supports_filters_pushdown(
-        &self,
-        filters: &[&Expr],
-    ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
-        match &self.table_format {
-            TableFormat::Iceberg(_) => {
-                // Push down all filters, as a single source of truth, the scanner will drop the filters which couldn't be push down
-                Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
-            }
+    fn table_exist(&self, name: &str) -> bool {
+        if let Some((table_name, metadata_table_name)) = name.split_once('$') {
+            self.table_names.contains(table_name)
+                && MetadataTableType::try_from(metadata_table_name).is_ok()
+        } else {
+            self.table_names.contains(name)
         }
     }
 }
