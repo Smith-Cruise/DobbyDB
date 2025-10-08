@@ -6,11 +6,9 @@ use rustyline::DefaultEditor;
 use std::sync::Arc;
 
 /// run and execute SQL statements and commands against a context with the given print options
-pub async fn exec_from_repl(
-    server: &DobbyDBServer
-) -> rustyline::Result<()> {
+pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
     let session_context = match server.create_session_context().await {
-        Ok(session_context) => {session_context},
+        Ok(session_context) => session_context,
         Err(err) => {
             eprintln!("{err}");
             return Ok(());
@@ -19,7 +17,7 @@ pub async fn exec_from_repl(
     let mut rl = DefaultEditor::new()?;
     let mut sql_buffer = String::new();
 
-    println!("SQL CLI - Enter your SQL commands (end with ;)");
+    println!("DobbyDB SQL CLI - Enter your SQL commands (end with ;)");
     println!("Type 'quit;' to exit\n");
 
     loop {
@@ -54,10 +52,6 @@ pub async fn exec_from_repl(
                         break;
                     }
 
-                    // 打印完整的 SQL 语句
-                    println!("\n执行 SQL:");
-                    println!("{}\n", sql);
-
                     // 这里可以添加实际执行 SQL 的逻辑
                     if let Err(e) = execute_sql(server, session_context.clone(), sql).await {
                         eprintln!("{e}");
@@ -69,7 +63,7 @@ pub async fn exec_from_repl(
             }
             Err(ReadlineError::Interrupted) => {
                 // Ctrl-C
-                println!("^C");
+                println!("CTRL-C");
                 sql_buffer.clear();
             }
             Err(ReadlineError::Eof) => {
@@ -86,6 +80,10 @@ pub async fn exec_from_repl(
     Ok(())
 }
 
-async fn execute_sql(server: &DobbyDBServer, session_context: Arc<SessionContext>, sql: &str) -> Result<(), DataFusionError> {
+async fn execute_sql(
+    server: &DobbyDBServer,
+    session_context: Arc<SessionContext>,
+    sql: &str,
+) -> Result<(), DataFusionError> {
     server.query(session_context, sql).await
 }
