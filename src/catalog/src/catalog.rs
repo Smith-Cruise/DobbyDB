@@ -1,5 +1,5 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
-use crate::hms_catalog::HMSCatalogConfig;
+use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
 use datafusion::catalog::CatalogProviderList;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
@@ -100,10 +100,9 @@ impl CatalogManager {
     ) -> Result<(), DataFusionError> {
         for (key, value) in &self.catalogs {
             match value {
-                CatalogConfig::HMS(_config) => {
-                    return Err(DataFusionError::NotImplemented(
-                        "hms not implemented".to_string(),
-                    ));
+                CatalogConfig::HMS(config) => {
+                    let hms_catalog = HMSCatalog::try_new(&Arc::new(config.clone())).await?;
+                    catalog_list.register_catalog(key.to_string(), Arc::new(hms_catalog));
                 }
                 CatalogConfig::GLUE(config) => {
                     let glue_catalog = GlueCatalog::try_new(&Arc::new(config.clone())).await?;
