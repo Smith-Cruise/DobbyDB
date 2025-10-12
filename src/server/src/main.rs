@@ -12,13 +12,18 @@ use dobbydb_sql::parser::ExtendedParser;
 use dobbydb_sql::planner::ExtendedQueryPlanner;
 use futures::StreamExt;
 use std::sync::Arc;
+use clap::Parser;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 
-pub struct DobbyDBServer {}
+pub struct DobbyDBServer {
+    args: DobbyDBArgs
+}
 
 impl DobbyDBServer {
-    pub fn new() -> Self {
-        Self {}
+    fn new(args: DobbyDBArgs) -> Self {
+        Self {
+            args
+        }
     }
 
     pub async fn init(&self) -> Result<(), DataFusionError> {
@@ -28,7 +33,7 @@ impl DobbyDBServer {
 
     fn load_config(&self) -> Result<(), DataFusionError> {
         let mut catalog_manager = get_catalog_manager().write().unwrap();
-        catalog_manager.load_config("/Users/smith/Software/DobbyDbConfig/catalog.toml")?;
+        catalog_manager.load_config(&self.args.config)?;
         Ok(())
     }
 
@@ -78,9 +83,17 @@ impl DobbyDBServer {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct DobbyDBArgs {
+    #[arg(short, long)]
+    config: String
+}
+
 #[tokio::main]
 async fn main() -> Result<(), DataFusionError> {
-    let server = DobbyDBServer::new();
+    let args = DobbyDBArgs::parse();
+    let server = DobbyDBServer::new(args);
     server.init().await?;
     exec::exec_from_repl(&server).await.map_err(|e| DataFusionError::External(Box::new(e)))?;
     Ok(())
@@ -92,7 +105,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_server() -> Result<(), DataFusionError> {
-        let server = DobbyDBServer::new();
+        let args = DobbyDBArgs {
+            config: "/Users/smith/Software/DobbyDbConfig/catalog.toml".to_string()
+        };
+        let server = DobbyDBServer::new(args);
         server.init().await?;
         let session_context = server.create_session_context().await?;
         server.query(session_context.clone(), "show catalogs").await?;

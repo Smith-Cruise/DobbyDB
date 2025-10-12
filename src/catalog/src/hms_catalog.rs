@@ -5,13 +5,13 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use hive_metastore::{GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder};
+use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY};
 use volo_thrift::MaybeException;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
