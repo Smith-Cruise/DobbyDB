@@ -20,7 +20,7 @@ futures = "0.3.31"
 async-trait = "0.1.88"
 #iceberg = { git = "https://github.com/apache/iceberg-rust", tag = "v0.7.0-rc.2" }
 #iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust", tag = "v0.7.0-rc.2", package = "iceberg-datafusion" }
-iceberg = { version = "0.7.0", features = ["storage-all"] }
+iceberg = { version = "0.7.0", features = ["storage-oss", "storage-s3"] }
 iceberg-datafusion = "0.7.0"
 dobbydb-catalog = { path = "src/catalog" }
 dobbydb-server = { path = "src/server" }

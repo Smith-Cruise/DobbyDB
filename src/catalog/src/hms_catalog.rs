@@ -5,7 +5,7 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use hive_metastore::{GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder};
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use iceberg::io::{OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -28,11 +28,18 @@ pub struct HMSCatalogConfig {
     pub aws_s3_access_key: Option<String>,
     #[serde(rename = "aws-s3-secret-key")]
     pub aws_s3_secret_key: Option<String>,
+
+    #[serde(rename = "oss-endpoint")]
+    pub oss_endpoint: Option<String>,
+    #[serde(rename = "oss-access-key")]
+    pub oss_access_key: Option<String>,
+    #[serde(rename = "oss-secret-key")]
+    pub oss_secret_key: Option<String>,
 }
 
 impl CatalogConfigTrait for HMSCatalogConfig {
     fn convert_iceberg_config(&self) -> HashMap<String, String> {
-        let mut map = HashMap::new();
+        let mut map: HashMap<String, String> = HashMap::new();
         if let Some(region) = &self.aws_s3_region {
             map.insert(S3_REGION.into(), region.clone());
         }
@@ -45,6 +52,17 @@ impl CatalogConfigTrait for HMSCatalogConfig {
         if let Some(secret_key) = &self.aws_s3_secret_key {
             map.insert(S3_SECRET_ACCESS_KEY.into(), secret_key.clone());
         }
+
+        if let Some(endpoint) = &self.oss_endpoint {
+            map.insert(OSS_ENDPOINT.into(), endpoint.clone());
+        }
+        if let Some(access_key) = &self.oss_access_key {
+            map.insert(OSS_ACCESS_KEY_ID.into(), access_key.clone());
+        }
+        if let Some(secret_key) = &self.oss_secret_key {
+            map.insert(OSS_ACCESS_KEY_SECRET.into(), secret_key.clone());
+        }
+
         map
     }
 }
@@ -189,8 +207,8 @@ impl SchemaProvider for HMSSchema {
         let hms_client = build_hms_client(&self.config)?;
         let get_table_request = GetTableRequest {
             db_name: self.schema_name.clone().into(),
-            tbl_name: tbl_name.to_string().into(),
-             capabilities: None
+            tbl_name: table_name.to_string().into(),
+            capabilities: None
         };
         let hms_table = hms_client
             .get_table_req(get_table_request)
