@@ -6,9 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
-pub trait CatalogConfigTrait: Send + Sync {
-    fn convert_iceberg_config(&self) -> HashMap<String, String>;
-}
 
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {

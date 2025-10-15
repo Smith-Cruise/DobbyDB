@@ -25,7 +25,7 @@ impl IcebergTableProvider {
     pub async fn try_new(
         table_reference: &TableReference,
         metadata_location: &str,
-        properties: &HashMap<String, String>,
+        properties: HashMap<String, String>,
     ) -> Result<Self, DataFusionError> {
         let schema_name: String;
         let table_name: String;

@@ -1,5 +1,6 @@
-use crate::catalog::CatalogConfigTrait;
-use crate::table_format::table_provider_factory::TableProviderFactory;
+use crate::catalog::CatalogConfig;
+use crate::storage::StorageCredentials;
+use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
 use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_glue::config::Credentials;
@@ -8,11 +9,11 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use iceberg::inspect::MetadataTableType;
-use iceberg::io::{S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,28 +25,8 @@ pub struct GlueCatalogConfig {
     pub aws_glue_access_key: Option<String>,
     #[serde(rename = "aws-glue-secret-key")]
     pub aws_glue_secret_key: Option<String>,
-    #[serde(rename = "aws-s3-region")]
-    pub aws_s3_region: Option<String>,
-    #[serde(rename = "aws-s3-access-key")]
-    pub aws_s3_access_key: Option<String>,
-    #[serde(rename = "aws-s3-secret-key")]
-    pub aws_s3_secret_key: Option<String>,
-}
-
-impl CatalogConfigTrait for GlueCatalogConfig {
-    fn convert_iceberg_config(&self) -> HashMap<String, String> {
-        let mut map: HashMap<String, String> = HashMap::new();
-        if let Some(region) = &self.aws_s3_region {
-            map.insert(S3_REGION.into(), region.clone());
-        }
-        if let Some(access_key) = &self.aws_s3_access_key {
-            map.insert(S3_ACCESS_KEY_ID.into(), access_key.clone());
-        }
-        if let Some(secret_key) = &self.aws_s3_secret_key {
-            map.insert(S3_SECRET_ACCESS_KEY.into(), secret_key.clone());
-        }
-        map
-    }
+    #[serde(flatten)]
+    pub storage_credential: Option<StorageCredentials>,
 }
 
 async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
@@ -152,18 +133,7 @@ impl SchemaProvider for GlueSchema {
         &self,
         tbl_name: &str,
     ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        let table_name: &str;
-        let metadata_table_name: Option<&str>;
-        match tbl_name.split_once("$") {
-            Some((tmp_table_name, tmp_metadata_table_name)) => {
-                table_name = tmp_table_name;
-                metadata_table_name = Some(tmp_metadata_table_name);
-            }
-            None => {
-                table_name = tbl_name;
-                metadata_table_name = None;
-            }
-        }
+        let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
         if !self.table_exist(table_name) {
             return Ok(None);
@@ -200,7 +170,7 @@ impl SchemaProvider for GlueSchema {
             &table_reference,
             metadata_table_name,
             glue_table_properties,
-            &*self.config,
+            CatalogConfig::GLUE(self.config.deref().clone()),
         )
         .await?;
         Ok(Some(table_provider))

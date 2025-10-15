@@ -19,7 +19,7 @@ impl IcebergTableProviderFactory {
         metadata_location: &str,
         table_reference: &TableReference,
         metadata_table_name: Option<&str>,
-        properties: &HashMap<String, String>,
+        properties: HashMap<String, String>,
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
         let iceberg_table_provider =
             IcebergTableProvider::try_new(table_reference, metadata_location, properties).await?;

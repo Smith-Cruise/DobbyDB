@@ -1,16 +1,19 @@
-use crate::catalog::CatalogConfigTrait;
-use crate::table_format::table_provider_factory::TableProviderFactory;
+use crate::catalog::CatalogConfig;
+use crate::storage::StorageCredentials;
+use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
-use hive_metastore::{GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder};
-use iceberg::io::{OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use hive_metastore::{
+    GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder,
+};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::net::ToSocketAddrs;
+use std::ops::Deref;
 use std::sync::Arc;
 use volo_thrift::MaybeException;
 
@@ -19,52 +22,8 @@ pub struct HMSCatalogConfig {
     pub name: String,
     #[serde(rename = "metastore-uri")]
     pub metastore_uri: String,
-
-    #[serde(rename = "aws-s3-region")]
-    pub aws_s3_region: Option<String>,
-    #[serde(rename = "aws-s3-endpoint")]
-    pub aws_s3_endpoint: Option<String>,
-    #[serde(rename = "aws-s3-access-key")]
-    pub aws_s3_access_key: Option<String>,
-    #[serde(rename = "aws-s3-secret-key")]
-    pub aws_s3_secret_key: Option<String>,
-
-    #[serde(rename = "oss-endpoint")]
-    pub oss_endpoint: Option<String>,
-    #[serde(rename = "oss-access-key")]
-    pub oss_access_key: Option<String>,
-    #[serde(rename = "oss-secret-key")]
-    pub oss_secret_key: Option<String>,
-}
-
-impl CatalogConfigTrait for HMSCatalogConfig {
-    fn convert_iceberg_config(&self) -> HashMap<String, String> {
-        let mut map: HashMap<String, String> = HashMap::new();
-        if let Some(region) = &self.aws_s3_region {
-            map.insert(S3_REGION.into(), region.clone());
-        }
-        if let Some(endpoint) = &self.aws_s3_endpoint {
-            map.insert(S3_ENDPOINT.into(), endpoint.clone());
-        }
-        if let Some(access_key) = &self.aws_s3_access_key {
-            map.insert(S3_ACCESS_KEY_ID.into(), access_key.clone());
-        }
-        if let Some(secret_key) = &self.aws_s3_secret_key {
-            map.insert(S3_SECRET_ACCESS_KEY.into(), secret_key.clone());
-        }
-
-        if let Some(endpoint) = &self.oss_endpoint {
-            map.insert(OSS_ENDPOINT.into(), endpoint.clone());
-        }
-        if let Some(access_key) = &self.oss_access_key {
-            map.insert(OSS_ACCESS_KEY_ID.into(), access_key.clone());
-        }
-        if let Some(secret_key) = &self.oss_secret_key {
-            map.insert(OSS_ACCESS_KEY_SECRET.into(), secret_key.clone());
-        }
-
-        map
-    }
+    #[serde(flatten)]
+    pub storage_credential: Option<StorageCredentials>,
 }
 
 fn build_hms_client(
@@ -187,18 +146,7 @@ impl SchemaProvider for HMSSchema {
         &self,
         tbl_name: &str,
     ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
-        let table_name: &str;
-        let metadata_table_name: Option<&str>;
-        match tbl_name.split_once("$") {
-            Some((tmp_table_name, tmp_metadata_table_name)) => {
-                table_name = tmp_table_name;
-                metadata_table_name = Some(tmp_metadata_table_name);
-            }
-            None => {
-                table_name = tbl_name;
-                metadata_table_name = None;
-            }
-        }
+        let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
         if !self.table_exist(table_name) {
             return Ok(None);
@@ -208,13 +156,14 @@ impl SchemaProvider for HMSSchema {
         let get_table_request = GetTableRequest {
             db_name: self.schema_name.clone().into(),
             tbl_name: table_name.to_string().into(),
-            capabilities: None
+            capabilities: None,
         };
         let hms_table = hms_client
             .get_table_req(get_table_request)
             .await
             .map(from_thrift_exception)
-            .map_err(|e| DataFusionError::External(e.into()))??.table;
+            .map_err(|e| DataFusionError::External(e.into()))??
+            .table;
 
         let table_reference = TableReference::full(
             self.config.name.as_str(),
@@ -239,7 +188,7 @@ impl SchemaProvider for HMSSchema {
             &table_reference,
             metadata_table_name,
             &hms_table_properties,
-            &*self.config,
+            CatalogConfig::HMS(self.config.deref().clone()),
         )
         .await?;
         Ok(Some(table_provider))

@@ -14,7 +14,7 @@ members = [
 datafusion = "49.0.2"
 sqlparser = "0.55.0"
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
-serde = { version = "1.0.219", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.5"
 futures = "0.3.31"
 async-trait = "0.1.88"
