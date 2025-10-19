@@ -4,6 +4,7 @@ use datafusion::prelude::SessionContext;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::sync::Arc;
+use tokio::signal;
 
 /// run and execute SQL statements and commands against a context with the given print options
 pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
@@ -52,18 +53,21 @@ pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
                         break;
                     }
 
-                    // 这里可以添加实际执行 SQL 的逻辑
-                    if let Err(e) = execute_sql(server, session_context.clone(), sql).await {
-                        eprintln!("{e}");
+                    tokio::select! {
+                        // 这里可以添加实际执行 SQL 的逻辑
+                        res = execute_sql(server, session_context.clone(), sql) => match res {
+                            Ok(_) => {}
+                            Err(err) => eprintln!("{err}"),
+                        },
+                        _ = signal::ctrl_c() => {
+                            println!("^C");
+                        },
                     }
-
                     // 清空缓冲区
                     sql_buffer.clear();
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // Ctrl-C
-                println!("CTRL-C");
                 sql_buffer.clear();
             }
             Err(ReadlineError::Eof) => {
