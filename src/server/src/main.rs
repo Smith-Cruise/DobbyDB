@@ -1,29 +1,25 @@
 mod exec;
+use clap::Parser;
 use datafusion::arrow;
+use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::get_catalog_manager;
-use dobbydb_catalog::internal_catalog::{
-    InternalCatalog,
-    INTERNAL_CATALOG,
-};
+use dobbydb_catalog::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
 use dobbydb_sql::parser::ExtendedParser;
 use dobbydb_sql::planner::ExtendedQueryPlanner;
 use futures::StreamExt;
 use std::sync::Arc;
-use clap::Parser;
-use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
+use std::time::Instant;
 
 pub struct DobbyDBServer {
-    args: DobbyDBArgs
+    args: DobbyDBArgs,
 }
 
 impl DobbyDBServer {
     fn new(args: DobbyDBArgs) -> Self {
-        Self {
-            args
-        }
+        Self { args }
     }
 
     pub async fn init(&self) -> Result<(), DataFusionError> {
@@ -42,6 +38,7 @@ impl DobbyDBServer {
         session_context: Arc<SessionContext>,
         query: &str,
     ) -> Result<(), DataFusionError> {
+        let overall_start = Instant::now();
         let parser = ExtendedParser::parse_sql(query)?;
         if parser.len() != 1 {
             return Err(DataFusionError::Execution(format!(
@@ -59,11 +56,14 @@ impl DobbyDBServer {
             let batch = batch?;
             arrow::util::pretty::print_batches(&[batch])?;
         }
+        let overall_dur = overall_start.elapsed();
+        println!("Timing: total={:?}", overall_dur);
         Ok(())
     }
 
     pub async fn create_session_context(&self) -> Result<Arc<SessionContext>, DataFusionError> {
-        let session_config = SessionConfig::new().with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
+        let session_config = SessionConfig::new()
+            .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config(session_config);
         let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
 
@@ -87,7 +87,7 @@ impl DobbyDBServer {
 #[command(version, about, long_about = None)]
 struct DobbyDBArgs {
     #[arg(short, long)]
-    config: String
+    config: String,
 }
 
 #[tokio::main]
@@ -95,7 +95,9 @@ async fn main() -> Result<(), DataFusionError> {
     let args = DobbyDBArgs::parse();
     let server = DobbyDBServer::new(args);
     server.init().await?;
-    exec::exec_from_repl(&server).await.map_err(|e| DataFusionError::External(Box::new(e)))?;
+    exec::exec_from_repl(&server)
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
     Ok(())
 }
 
@@ -106,13 +108,17 @@ mod tests {
     #[tokio::test]
     async fn test_server() -> Result<(), DataFusionError> {
         let args = DobbyDBArgs {
-            config: "/Users/smith/Software/DobbyDbConfig/catalog.toml".to_string()
+            config: "/Users/smith/Software/DobbyDbConfig/catalog.toml".to_string(),
         };
         let server = DobbyDBServer::new(args);
         server.init().await?;
         let session_context = server.create_session_context().await?;
-        server.query(session_context.clone(), "show catalogs").await?;
-        server.query(session_context.clone(), "show schemas").await?;
+        server
+            .query(session_context.clone(), "show catalogs")
+            .await?;
+        server
+            .query(session_context.clone(), "show schemas")
+            .await?;
         // println!("{:?}", get_catalog_manager().read().unwrap());
         Ok(())
     }
