@@ -11,3 +11,4 @@ tokio = { workspace = true }
 dobbydb-catalog = { workspace = true }
 dobbydb-sql = {workspace = true}
 futures = { workspace = true }
+console-subscriber = { workspace = true }
