@@ -2,11 +2,10 @@ use crate::statements::ExtendedStatement;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::sqlparser::dialect::Dialect;
 use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
-use sqlparser::dialect::DatabricksDialect;
+use sqlparser::dialect::{DatabricksDialect, Dialect};
 use std::collections::VecDeque;
 
 // Use `Parser::expected` instead, if possible

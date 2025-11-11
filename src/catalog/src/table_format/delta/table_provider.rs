@@ -10,9 +10,9 @@ pub struct DeltaTableProvider {
 
 impl DeltaTableProvider {
     pub async fn try_new(
-        table_reference: &TableReference,
+        _table_reference: &TableReference,
         table_location: &str,
-        properties: HashMap<String, String>,
+        _properties: HashMap<String, String>,
     ) -> Result<DeltaTable, DataFusionError> {
         let table_url =
             Url::parse(table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
