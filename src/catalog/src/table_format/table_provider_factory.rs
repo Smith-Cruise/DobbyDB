@@ -1,5 +1,6 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::convert_storage_to_iceberg;
+use crate::storage::{convert_storage_to_delta, convert_storage_to_iceberg};
+use crate::table_format::delta::DeltaTableProviderFactory;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
 use datafusion::catalog::TableProvider;
 use datafusion::error::DataFusionError;
@@ -41,11 +42,29 @@ impl TableProviderFactory {
         }
 
         if let Some(spark_provider) = table_properties.get("spark.sql.sources.provider") {
-            if spark_provider == "DELTA" {
-                // delta
-                return Err(DataFusionError::NotImplemented(
-                    "delta is not implemented".to_string(),
-                ));
+            if let Some(table_location) = table_properties.get("location") {
+                if spark_provider == "DELTA" {
+                    // delta
+                    let mut delta_config: HashMap<String, String> = HashMap::new();
+                    match catalog_config {
+                        CatalogConfig::GLUE(glue_config) => {
+                            if let Some(storage_credentials) = &glue_config.storage_credential {
+                                delta_config = convert_storage_to_delta(storage_credentials);
+                            }
+                        }
+                        CatalogConfig::HMS(hms_config) => {
+                            if let Some(storage_credentials) = &hms_config.storage_credential {
+                                delta_config = convert_storage_to_delta(storage_credentials);
+                            }
+                        }
+                    }
+                    return DeltaTableProviderFactory::try_create_table_provider(
+                        table_reference,
+                        table_location,
+                        delta_config,
+                    )
+                    .await;
+                }
             }
         }
 

@@ -1,3 +1,6 @@
+use deltalake_aws::constants::{
+    AWS_ACCESS_KEY_ID, AWS_ENDPOINT_URL, AWS_REGION, AWS_SECRET_ACCESS_KEY,
+};
 use iceberg::io::{
     OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, S3_ACCESS_KEY_ID, S3_ENDPOINT,
     S3_REGION, S3_SECRET_ACCESS_KEY,
@@ -66,5 +69,38 @@ pub fn convert_storage_to_iceberg(
         }
     }
 
+    map
+}
+
+pub fn convert_storage_to_delta(
+    storage_credentials: &StorageCredentials,
+) -> HashMap<String, String> {
+    let mut map: HashMap<String, String> = HashMap::new();
+    if let Some(s3_credential) = &storage_credentials.s3_credential {
+        if let Some(region) = &s3_credential.aws_s3_region {
+            map.insert(AWS_REGION.to_string(), region.clone());
+        }
+        if let Some(endpoint) = &s3_credential.aws_s3_endpoint {
+            map.insert(AWS_ENDPOINT_URL.to_string(), endpoint.clone());
+        }
+        if let Some(access_key) = &s3_credential.aws_s3_access_key {
+            map.insert(AWS_ACCESS_KEY_ID.to_string(), access_key.clone());
+        }
+        if let Some(secret_key) = &s3_credential.aws_s3_secret_key {
+            map.insert(AWS_SECRET_ACCESS_KEY.to_string(), secret_key.clone());
+        }
+    }
+
+    if let Some(oss_credential) = &storage_credentials.oss_credential {
+        if let Some(endpoint) = &oss_credential.oss_endpoint {
+            map.insert(AWS_ENDPOINT_URL.to_string(), endpoint.clone());
+        }
+        if let Some(access_key) = &oss_credential.oss_access_key {
+            map.insert(AWS_ACCESS_KEY_ID.to_string(), access_key.clone());
+        }
+        if let Some(secret_key) = &oss_credential.oss_secret_key {
+            map.insert(AWS_SECRET_ACCESS_KEY.to_string(), secret_key.clone());
+        }
+    }
     map
 }

@@ -5,7 +5,10 @@ use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
-
+use deltalake::logstore::{logstore_factories, object_store_factories};
+use deltalake_aws::S3LogStoreFactory;
+use deltalake_aws::storage::S3ObjectStoreFactory;
+use url::Url;
 
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {
@@ -83,7 +86,7 @@ impl CatalogManager {
             }
             None => {}
         }
-
+        register_something();
         Ok(())
     }
     
@@ -108,5 +111,19 @@ impl CatalogManager {
             }
         }
         Ok(())
+    }
+}
+
+
+fn register_something() {
+    {
+        // register delta
+        let object_stores = Arc::new(S3ObjectStoreFactory::default());
+        let log_stores = Arc::new(S3LogStoreFactory::default());
+        for scheme in ["s3", "s3a", "oss"].iter() {
+            let url = Url::parse(&format!("{scheme}://")).unwrap();
+            object_store_factories().insert(url.clone(), object_stores.clone());
+            logstore_factories().insert(url.clone(), log_stores.clone());
+        }
     }
 }

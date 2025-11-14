@@ -23,7 +23,8 @@ iceberg = { git = "https://github.com/apache/iceberg-rust", rev = "5c46965842b71
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust", rev = "5c46965842b716cbef95ea9b47ff11da6edd0ccb", package = "iceberg-datafusion" }
 #iceberg = { version = "0.7.0", features = ["storage-oss", "storage-s3"] }
 #iceberg-datafusion = "0.7.0"
-deltalake = { version = "0.29.3", features = ["datafusion"] }
+deltalake = { version = "0.29.3", features = ["datafusion", "s3"] }
+deltalake-aws = "0.12.1"
 dobbydb-catalog = { path = "src/catalog" }
 dobbydb-server = { path = "src/server" }
 dobbydb-sql = { path = "src/sql" }

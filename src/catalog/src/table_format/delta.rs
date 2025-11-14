@@ -10,12 +10,12 @@ pub struct DeltaTableProviderFactory {}
 
 impl DeltaTableProviderFactory {
     pub async fn try_create_table_provider(
-        metadata_location: &str,
         table_reference: &TableReference,
+        table_location: &str,
         properties: HashMap<String, String>,
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
         let delta_table_provider =
-            DeltaTableProvider::try_new(table_reference, metadata_location, properties).await?;
+            DeltaTableProvider::try_new(table_reference, table_location, properties).await?;
         Ok(Arc::new(delta_table_provider))
     }
 }

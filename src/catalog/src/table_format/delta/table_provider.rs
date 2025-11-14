@@ -12,12 +12,13 @@ impl DeltaTableProvider {
     pub async fn try_new(
         _table_reference: &TableReference,
         table_location: &str,
-        _properties: HashMap<String, String>,
+        properties: HashMap<String, String>,
     ) -> Result<DeltaTable, DataFusionError> {
         let table_url =
             Url::parse(table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let builder = DeltaTableBuilder::from_uri(table_url)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+            .with_storage_options(properties);
         let delta_table =
             builder
                 .load()
