@@ -1,21 +1,23 @@
-use crate::DobbyDBServer;
 use datafusion::error::DataFusionError;
-use datafusion::prelude::SessionContext;
+use datafusion_cli::print_options::PrintOptions;
+use dobbydb_sql::session::ExtendedSessionContext;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::{DefaultEditor, Editor};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::signal;
 
 /// run and execute SQL statements and commands against a context with the given print options
-pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
-    let session_context = match server.create_session_context().await {
-        Ok(session_context) => session_context,
-        Err(err) => {
-            eprintln!("{err}");
-            return Ok(());
-        }
-    };
-    let mut rl = DefaultEditor::new()?;
+pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &mut PrintOptions) {
+    let mut rl: DefaultEditor = Editor::new().expect("created editor");
+    // rl.set_helper(Some(CliHelper::new(
+    //     &ctx.task_ctx().session_config().options().sql_parser.dialect,
+    //     print_options.color,
+    // )));
+    rl.load_history(".history").ok();
+
+    let print_options = print_options.clone();
+
     let mut sql_buffer = String::new();
 
     println!("DobbyDB SQL CLI - Enter your SQL commands (end with ;)");
@@ -34,7 +36,7 @@ pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
                 let trimmed = line.trim();
 
                 // 添加到历史记录
-                rl.add_history_entry(trimmed)?;
+                rl.add_history_entry(trimmed).unwrap();
 
                 // 将输入添加到缓冲区
                 if !sql_buffer.is_empty() {
@@ -55,12 +57,12 @@ pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
 
                     tokio::select! {
                         // 这里可以添加实际执行 SQL 的逻辑
-                        res = execute_sql(server, session_context.clone(), sql) => match res {
+                        res = exec_and_print(&ctx, &print_options, sql) => match res {
                             Ok(_) => {}
                             Err(err) => eprintln!("{err}"),
                         },
                         _ = signal::ctrl_c() => {
-                            println!("^C");
+                            // println!("^C");
                         },
                     }
                     // 清空缓冲区
@@ -81,13 +83,23 @@ pub async fn exec_from_repl(server: &DobbyDBServer) -> rustyline::Result<()> {
             }
         }
     }
-    Ok(())
+
+    rl.save_history(".history").ok();
 }
 
-async fn execute_sql(
-    server: &DobbyDBServer,
-    session_context: Arc<SessionContext>,
+async fn exec_and_print(
+    ctx: &ExtendedSessionContext,
+    print_options: &PrintOptions,
     sql: &str,
 ) -> Result<(), DataFusionError> {
-    server.query(session_context, sql).await
+    let now = Instant::now();
+    let df = ctx.sql(sql).await?;
+    let schema = Arc::new(df.schema().as_arrow().clone());
+    let results = df.collect().await?;
+    let mut row_count = 0;
+    for result in &results {
+        row_count += result.num_rows();
+    }
+    print_options.print_batches(schema, &results, now, row_count, &Default::default())?;
+    Ok(())
 }

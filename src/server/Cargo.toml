@@ -7,6 +7,7 @@ edition = { workspace = true }
 rustyline = "17.0.2"
 clap = { version = "4.5.48", features = ["derive"] }
 datafusion = { workspace = true }
+datafusion-cli = { workspace = true }
 tokio = { workspace = true }
 dobbydb-catalog = { workspace = true }
 dobbydb-sql = {workspace = true}

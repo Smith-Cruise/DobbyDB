@@ -1,17 +1,13 @@
 mod exec;
+
 use clap::Parser;
 use datafusion::arrow;
-use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
+use datafusion::arrow::array::RecordBatch;
 use datafusion::error::DataFusionError;
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion_cli::print_format::PrintFormat;
+use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use dobbydb_catalog::catalog::get_catalog_manager;
-use dobbydb_catalog::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
-use dobbydb_sql::parser::ExtendedParser;
-use dobbydb_sql::planner::ExtendedQueryPlanner;
-use futures::StreamExt;
-use std::sync::Arc;
-use std::time::Instant;
+use dobbydb_sql::session::ExtendedSessionContext;
 
 pub struct DobbyDBServer {
     args: DobbyDBArgs,
@@ -32,55 +28,6 @@ impl DobbyDBServer {
         catalog_manager.load_config(&self.args.config)?;
         Ok(())
     }
-
-    pub async fn query(
-        &self,
-        session_context: Arc<SessionContext>,
-        query: &str,
-    ) -> Result<(), DataFusionError> {
-        let overall_start = Instant::now();
-        let parser = ExtendedParser::parse_sql(query)?;
-        if parser.len() != 1 {
-            return Err(DataFusionError::Execution(format!(
-                "Invalid query: {}",
-                query
-            )));
-        }
-
-        let stmt = &parser[0];
-        let planner = ExtendedQueryPlanner::new(session_context)?;
-        let logic_plan = planner.create_logical_plan(stmt).await?;
-        let physical_plan = planner.create_physical_plan(&logic_plan).await?;
-        let mut batch_stream = planner.execute_physical_plan(physical_plan).await?;
-        while let Some(batch) = batch_stream.next().await {
-            let batch = batch?;
-            arrow::util::pretty::print_batches(&[batch])?;
-        }
-        let overall_dur = overall_start.elapsed();
-        println!("Timing: total={:?}", overall_dur);
-        Ok(())
-    }
-
-    pub async fn create_session_context(&self) -> Result<Arc<SessionContext>, DataFusionError> {
-        let session_config = SessionConfig::new()
-            .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
-        let session_context = SessionContext::new_with_config(session_config);
-        let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
-
-        let catalog_manager = get_catalog_manager().read().unwrap();
-        catalog_manager
-            .register_into_catalog_provider_list(memory_catalog_provider_list.clone())
-            .await?;
-
-        // load internal catalog
-        memory_catalog_provider_list.register_catalog(
-            INTERNAL_CATALOG.to_string(),
-            Arc::new(InternalCatalog::try_new(memory_catalog_provider_list.clone()).await?),
-        );
-
-        session_context.register_catalog_list(memory_catalog_provider_list);
-        Ok(Arc::new(session_context))
-    }
 }
 
 #[derive(Parser, Debug)]
@@ -95,15 +42,27 @@ async fn main() -> Result<(), DataFusionError> {
     let args = DobbyDBArgs::parse();
     let server = DobbyDBServer::new(args);
     server.init().await?;
-    exec::exec_from_repl(&server)
-        .await
-        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    let mut print_options = PrintOptions {
+        format: PrintFormat::Table,
+        quiet: false,
+        maxrows: MaxRows::Unlimited,
+        color: true,
+    };
+    let session_context = ExtendedSessionContext::new().await?;
+    exec::exec_from_repl(&session_context, &mut print_options).await;
+    Ok(())
+}
+
+pub async fn print_batches(batches: Vec<RecordBatch>) -> Result<(), DataFusionError> {
+    arrow::util::pretty::print_batches(&batches)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dobbydb_sql::session::ExtendedSessionContext;
 
     #[tokio::test]
     async fn test_server() -> Result<(), DataFusionError> {
@@ -112,14 +71,18 @@ mod tests {
         };
         let server = DobbyDBServer::new(args);
         server.init().await?;
-        let session_context = server.create_session_context().await?;
-        server
-            .query(session_context.clone(), "show catalogs")
-            .await?;
-        server
-            .query(session_context.clone(), "show schemas")
-            .await?;
-        // println!("{:?}", get_catalog_manager().read().unwrap());
+        let session_context = ExtendedSessionContext::new().await?;
+
+        // show catalogs
+        let df = session_context.sql("show catalogs").await?;
+        let batches = df.collect().await?;
+        print_batches(batches).await?;
+
+        // show schemas
+        let df = session_context.sql("show schemas").await?;
+        let batches = df.collect().await?;
+        print_batches(batches).await?;
         Ok(())
     }
 }
+
