@@ -1,5 +1,5 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::StorageCredentials;
+use crate::storage::StorageCredential;
 use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
@@ -23,7 +23,7 @@ pub struct HMSCatalogConfig {
     #[serde(rename = "metastore-uri")]
     pub metastore_uri: String,
     #[serde(flatten)]
-    pub storage_credential: Option<StorageCredentials>,
+    pub storage_credential: Option<StorageCredential>,
 }
 
 fn build_hms_client(

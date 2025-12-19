@@ -1,16 +1,19 @@
+use crate::storage::StorageCredential;
 use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
+use crate::table_format::iceberg::table_provider::IcebergTableProvider;
 use datafusion::catalog::TableProvider;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
 use iceberg::io::FileIO;
 use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
-use iceberg_datafusion::IcebergTableProvider;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 mod metadata_scan;
 pub mod metadata_table_provider;
+mod table_provider;
+mod table_scan;
 
 pub struct IcebergTableProviderFactory {}
 
@@ -19,7 +22,7 @@ impl IcebergTableProviderFactory {
         metadata_location: &str,
         table_reference: &TableReference,
         metadata_table_name: Option<&str>,
-        properties: HashMap<String, String>,
+        storage_credential: Option<StorageCredential>,
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
         let schema_name: String;
         let table_name: String;
@@ -36,9 +39,14 @@ impl IcebergTableProviderFactory {
                 return Err(DataFusionError::Plan("invalid table reference".to_string()));
             }
         }
+        let file_io_properties = if let Some(credential) = &storage_credential {
+            credential.build_iceberg_file_io_properties()
+        } else {
+            HashMap::new()
+        };
         let file_io = FileIO::from_path(metadata_location)
             .map_err(|e| DataFusionError::External(Box::new(e)))?
-            .with_props(properties)
+            .with_props(file_io_properties)
             .build()
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
@@ -58,9 +66,13 @@ impl IcebergTableProviderFactory {
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_name)?;
             Ok(Arc::new(metadata_table_provider))
         } else {
-            let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table)
-                .await
-                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            // using iceberg official sdk
+            // let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table)
+            //     .await
+            //     .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            // Ok(Arc::new(iceberg_table))
+            let iceberg_table =
+                IcebergTableProvider::try_new_from_table(iceberg_table, storage_credential).await?;
             Ok(Arc::new(iceberg_table))
         }
     }

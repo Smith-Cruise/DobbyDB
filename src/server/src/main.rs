@@ -44,7 +44,7 @@ async fn main() -> Result<(), DataFusionError> {
     server.init().await?;
 
     let mut print_options = PrintOptions {
-        format: PrintFormat::Table,
+        format: PrintFormat::Tsv,
         quiet: false,
         maxrows: MaxRows::Unlimited,
         color: true,

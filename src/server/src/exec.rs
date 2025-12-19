@@ -3,7 +3,6 @@ use datafusion_cli::print_options::PrintOptions;
 use dobbydb_sql::session::ExtendedSessionContext;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Editor};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::signal;
 
@@ -94,12 +93,14 @@ async fn exec_and_print(
 ) -> Result<(), DataFusionError> {
     let now = Instant::now();
     let df = ctx.sql(sql).await?;
-    let schema = Arc::new(df.schema().as_arrow().clone());
-    let results = df.collect().await?;
-    let mut row_count = 0;
-    for result in &results {
-        row_count += result.num_rows();
-    }
-    print_options.print_batches(schema, &results, now, row_count, &Default::default())?;
+    let stream = df.execute_stream().await?;
+    // let schema = Arc::new(df.schema().as_arrow().clone());
+    // let results = df.collect().await?;
+    // let mut row_count = 0;
+    // for result in &results {
+    //     row_count += result.num_rows();
+    // }
+    print_options.print_stream(stream, now, &Default::default()).await?;
+    // print_options.print_batches(schema, &results, now, row_count, &Default::default())?;
     Ok(())
 }

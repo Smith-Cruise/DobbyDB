@@ -1,5 +1,5 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::StorageCredentials;
+use crate::storage::StorageCredential;
 use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
 use async_trait::async_trait;
 use aws_config::Region;
@@ -26,7 +26,7 @@ pub struct GlueCatalogConfig {
     #[serde(rename = "aws-glue-secret-key")]
     pub aws_glue_secret_key: Option<String>,
     #[serde(flatten)]
-    pub storage_credential: Option<StorageCredentials>,
+    pub storage_credential: Option<StorageCredential>,
 }
 
 async fn build_glue_client(config: &GlueCatalogConfig) -> Client {

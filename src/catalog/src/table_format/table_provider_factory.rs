@@ -1,5 +1,5 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::{convert_storage_to_delta, convert_storage_to_iceberg};
+use crate::storage::StorageCredential;
 use crate::table_format::delta::DeltaTableProviderFactory;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
 use datafusion::catalog::TableProvider;
@@ -19,24 +19,20 @@ impl TableProviderFactory {
     ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
         if let Some(iceberg_metadata_location) = table_properties.get("metadata_location") {
             // iceberg
-            let mut iceberg_config: HashMap<String, String> = HashMap::new();
+            let storage_credential: Option<StorageCredential>;
             match catalog_config {
                 CatalogConfig::GLUE(glue_config) => {
-                    if let Some(storage_credentials) = &glue_config.storage_credential {
-                        iceberg_config = convert_storage_to_iceberg(storage_credentials);
-                    }
+                    storage_credential = glue_config.storage_credential.clone();
                 }
                 CatalogConfig::HMS(hms_config) => {
-                    if let Some(storage_credentials) = &hms_config.storage_credential {
-                        iceberg_config = convert_storage_to_iceberg(storage_credentials);
-                    }
+                    storage_credential = hms_config.storage_credential.clone();
                 }
             }
             return IcebergTableProviderFactory::try_create_table_provider(
                 iceberg_metadata_location,
                 table_reference,
                 metadata_table_name,
-                iceberg_config,
+                storage_credential,
             )
             .await;
         }
@@ -45,23 +41,19 @@ impl TableProviderFactory {
             if let Some(table_location) = table_properties.get("location") {
                 if spark_provider == "DELTA" {
                     // delta
-                    let mut delta_config: HashMap<String, String> = HashMap::new();
+                    let storage_credential: Option<StorageCredential>;
                     match catalog_config {
                         CatalogConfig::GLUE(glue_config) => {
-                            if let Some(storage_credentials) = &glue_config.storage_credential {
-                                delta_config = convert_storage_to_delta(storage_credentials);
-                            }
+                            storage_credential = glue_config.storage_credential.clone();
                         }
                         CatalogConfig::HMS(hms_config) => {
-                            if let Some(storage_credentials) = &hms_config.storage_credential {
-                                delta_config = convert_storage_to_delta(storage_credentials);
-                            }
+                            storage_credential = hms_config.storage_credential.clone();
                         }
                     }
                     return DeltaTableProviderFactory::try_create_table_provider(
                         table_reference,
                         table_location,
-                        delta_config,
+                        storage_credential,
                     )
                     .await;
                 }
