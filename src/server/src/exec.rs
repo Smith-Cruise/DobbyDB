@@ -94,13 +94,6 @@ async fn exec_and_print(
     let now = Instant::now();
     let df = ctx.sql(sql).await?;
     let stream = df.execute_stream().await?;
-    // let schema = Arc::new(df.schema().as_arrow().clone());
-    // let results = df.collect().await?;
-    // let mut row_count = 0;
-    // for result in &results {
-    //     row_count += result.num_rows();
-    // }
     print_options.print_stream(stream, now, &Default::default()).await?;
-    // print_options.print_batches(schema, &results, now, row_count, &Default::default())?;
     Ok(())
 }
