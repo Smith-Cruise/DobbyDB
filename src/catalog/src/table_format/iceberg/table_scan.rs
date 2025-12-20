@@ -214,12 +214,14 @@ impl ExecutionPlan for IcebergTableScan {
 
     fn repartitioned(
         &self,
-        _target_partitions: usize,
-        _config: &ConfigOptions,
-    ) -> datafusion::common::Result<Option<Arc<dyn ExecutionPlan>>> {
-        // todo
-        Ok(None)
-        // self.parquet_scan.repartitioned(target_partitions, config)
+        target_partitions: usize,
+        config: &ConfigOptions,
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>, DataFusionError> {
+        if let Some(partition_scan) = self.parquet_scan.repartitioned(target_partitions, config)? {
+            Ok(Some(Arc::new(IcebergTableScan::new(partition_scan))))
+        } else {
+            Ok(None)
+        }
     }
 
     fn execute(
