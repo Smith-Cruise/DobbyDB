@@ -193,9 +193,9 @@ mod tests {
 
     #[test]
     fn test_show_catalogs() -> Result<()> {
-        // let statement = ExtendedParser::parse_sql("show catalogs")?;
-        // let stmt = &statement[0];
-        // assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
+        let statement = ExtendedParser::parse_sql("show catalogs")?;
+        let stmt = &statement[0];
+        assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
         Ok(())
     }
 
