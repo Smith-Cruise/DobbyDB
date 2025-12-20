@@ -126,9 +126,20 @@ impl<'a> IcebergTableScanBuilder<'a> {
         let parquet_options = TableParquetOptions::default();
         let file_source = ParquetSource::new(parquet_options);
 
+        // 根据 projection 创建投影后的 schema
+        let projected_schema = if let Some(projection) = self.projection {
+            let projected_fields: Vec<_> = projection
+                .iter()
+                .map(|&i| self.schema.field(i).clone())
+                .collect();
+            Arc::new(Schema::new(projected_fields))
+        } else {
+            self.schema.clone()
+        };
+
         let file_scan_config = FileScanConfigBuilder::new(
             ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?,
-            self.schema.clone(),
+            projected_schema,
             Arc::new(file_source),
         )
         .with_file_group(FileGroup::new(partition_fields))
