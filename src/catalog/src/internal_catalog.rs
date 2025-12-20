@@ -4,9 +4,9 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::catalog::{
-    CatalogProvider, CatalogProviderList, MemorySchemaProvider,
-    SchemaProvider,
+    CatalogProvider, CatalogProviderList, MemorySchemaProvider, SchemaProvider,
 };
+use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -25,9 +25,7 @@ pub struct InternalCatalog {
 }
 
 impl InternalCatalog {
-    pub async fn try_new(
-        catalog_provider_list: Arc<dyn CatalogProviderList>,
-    ) -> Result<Self, DataFusionError> {
+    pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self> {
         let information_schema = Arc::new(MemorySchemaProvider::new());
 
         // show catalogs
@@ -56,9 +54,7 @@ impl InternalCatalog {
         Ok(Self { information_schema })
     }
 
-    fn wrap_with_stream_table(
-        table: Arc<dyn PartitionStream>,
-    ) -> Result<StreamingTable, DataFusionError> {
+    fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
         Ok(StreamingTable::try_new(
             Arc::clone(&table.schema()),
             vec![table],
@@ -88,7 +84,6 @@ impl CatalogProvider for InternalCatalog {
 pub struct InformationSchemaShowCatalogs {
     catalog_provider_list: Arc<dyn CatalogProviderList>,
     schema: SchemaRef,
-
 }
 
 impl InformationSchemaShowCatalogs {
@@ -99,7 +94,10 @@ impl InformationSchemaShowCatalogs {
             Field::new("catalog_config", DataType::Utf8, true),
         ]));
 
-        InformationSchemaShowCatalogs { catalog_provider_list, schema }
+        InformationSchemaShowCatalogs {
+            catalog_provider_list,
+            schema,
+        }
     }
 }
 
@@ -127,12 +125,13 @@ impl PartitionStream for InformationSchemaShowCatalogs {
             let catalog_config = match catalog_config {
                 Some(config) => config,
                 None => {
-                    let error = DataFusionError::Internal(format!("catalog {} not found", catalog_name));
+                    let error =
+                        DataFusionError::Internal(format!("catalog {} not found", catalog_name));
                     return Box::pin(RecordBatchStreamAdapter::new(
                         Arc::clone(&self.schema),
                         futures::stream::once(async move { Err(error) }),
                     ));
-                },
+                }
             };
 
             match catalog_config {
@@ -157,9 +156,10 @@ impl PartitionStream for InformationSchemaShowCatalogs {
             Ok(record_batch) => record_batch,
             Err(error) => {
                 let error = DataFusionError::External(Box::new(error));
-                return Box::pin(RecordBatchStreamAdapter::new(self.schema.clone(), futures::stream::once(
-                    async move { Err(error) },
-                )));
+                return Box::pin(RecordBatchStreamAdapter::new(
+                    self.schema.clone(),
+                    futures::stream::once(async move { Err(error) }),
+                ));
             }
         };
 

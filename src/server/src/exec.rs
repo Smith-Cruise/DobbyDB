@@ -1,4 +1,4 @@
-use datafusion::error::DataFusionError;
+use datafusion::common::Result;
 use datafusion_cli::print_options::PrintOptions;
 use dobbydb_sql::session::ExtendedSessionContext;
 use rustyline::error::ReadlineError;
@@ -90,7 +90,7 @@ async fn exec_and_print(
     ctx: &ExtendedSessionContext,
     print_options: &PrintOptions,
     sql: &str,
-) -> Result<(), DataFusionError> {
+) -> Result<()> {
     let now = Instant::now();
     let df = ctx.sql(sql).await?;
     let stream = df.execute_stream().await?;

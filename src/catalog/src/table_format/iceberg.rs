@@ -2,6 +2,7 @@ use crate::storage::StorageCredential;
 use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
 use crate::table_format::iceberg::table_provider::IcebergTableProvider;
 use datafusion::catalog::TableProvider;
+use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
 use iceberg::io::FileIO;
@@ -23,7 +24,7 @@ impl IcebergTableProviderFactory {
         table_reference: &TableReference,
         metadata_table_name: Option<&str>,
         storage_credential: Option<StorageCredential>,
-    ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
+    ) -> Result<Arc<dyn TableProvider>> {
         let schema_name: String;
         let table_name: String;
         match table_reference {

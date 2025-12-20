@@ -1,6 +1,7 @@
-use datafusion::catalog::TableProvider;
-use datafusion::physical_expr::EquivalenceProperties;
 use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
+use datafusion::catalog::TableProvider;
+use datafusion::common::Result;
+use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
@@ -57,7 +58,7 @@ impl ExecutionPlan for IcebergMetadataScan {
     fn with_new_children(
         self: std::sync::Arc<Self>,
         _children: Vec<std::sync::Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::error::Result<std::sync::Arc<dyn ExecutionPlan>> {
+    ) -> Result<std::sync::Arc<dyn ExecutionPlan>> {
         Ok(self)
     }
 
@@ -65,7 +66,7 @@ impl ExecutionPlan for IcebergMetadataScan {
         &self,
         _partition: usize,
         _context: std::sync::Arc<datafusion::execution::TaskContext>,
-    ) -> datafusion::error::Result<datafusion::execution::SendableRecordBatchStream> {
+    ) -> Result<datafusion::execution::SendableRecordBatchStream> {
         let fut = self.provider.clone().scan();
         let stream = futures::stream::once(fut).try_flatten();
         let schema = self.provider.schema();

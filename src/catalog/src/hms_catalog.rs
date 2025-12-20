@@ -3,6 +3,7 @@ use crate::storage::StorageCredential;
 use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
+use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use hive_metastore::{
@@ -26,9 +27,7 @@ pub struct HMSCatalogConfig {
     pub storage_credential: Option<StorageCredential>,
 }
 
-fn build_hms_client(
-    config: &Arc<HMSCatalogConfig>,
-) -> Result<ThriftHiveMetastoreClient, DataFusionError> {
+fn build_hms_client(config: &Arc<HMSCatalogConfig>) -> Result<ThriftHiveMetastoreClient> {
     let address = config
         .metastore_uri
         .as_str()
@@ -46,9 +45,7 @@ fn build_hms_client(
 }
 
 /// Format a thrift exception into iceberg error.
-pub fn from_thrift_exception<T, E: Debug>(
-    value: MaybeException<T, E>,
-) -> Result<T, DataFusionError> {
+pub fn from_thrift_exception<T, E: Debug>(value: MaybeException<T, E>) -> Result<T> {
     match value {
         MaybeException::Ok(v) => Ok(v),
         MaybeException::Exception(err) => Err(DataFusionError::Internal(format!(
@@ -65,7 +62,7 @@ pub struct HMSCatalog {
 }
 
 impl HMSCatalog {
-    pub async fn try_new(config: &Arc<HMSCatalogConfig>) -> Result<Self, DataFusionError> {
+    pub async fn try_new(config: &Arc<HMSCatalogConfig>) -> Result<Self> {
         let hms_client = build_hms_client(config)?;
         let all_database_names = hms_client
             .get_all_databases()
@@ -112,7 +109,7 @@ impl HMSSchema {
         hms_client: &ThriftHiveMetastoreClient,
         config: &Arc<HMSCatalogConfig>,
         schema_name: &str,
-    ) -> Result<Self, DataFusionError> {
+    ) -> Result<Self> {
         let all_tables = hms_client
             .get_all_tables(schema_name.to_string().into())
             .await
@@ -142,10 +139,7 @@ impl SchemaProvider for HMSSchema {
         self.table_names.iter().cloned().collect()
     }
 
-    async fn table(
-        &self,
-        tbl_name: &str,
-    ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
+    async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
         let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
         if !self.table_exist(table_name) {

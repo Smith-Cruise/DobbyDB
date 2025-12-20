@@ -1,4 +1,5 @@
 use crate::storage::StorageCredential;
+use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use deltalake::{DeltaTable, DeltaTableBuilder};
@@ -13,7 +14,7 @@ impl DeltaTableProvider {
         _table_reference: &TableReference,
         table_location: &str,
         storage_credential: Option<StorageCredential>,
-    ) -> Result<DeltaTable, DataFusionError> {
+    ) -> Result<DeltaTable> {
         let storage_options = if let Some(storage_credential) = &storage_credential {
             storage_credential.build_delta_storage_options()
         } else {

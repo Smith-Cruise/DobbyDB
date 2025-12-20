@@ -1,4 +1,5 @@
 use datafusion::catalog::Session;
+use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::object_store::aws::AmazonS3Builder;
 use datafusion::object_store::ObjectStore;
@@ -49,7 +50,7 @@ impl StorageCredential {
         &self,
         table_location: impl Into<String>,
         session: &dyn Session,
-    ) -> Result<(), DataFusionError> {
+    ) -> Result<()> {
         let table_location = table_location.into();
         let (schema, host) = parse_location_schema_host(&table_location)?;
 
@@ -137,7 +138,7 @@ impl S3Credential {
     fn build_object_store(
         &self,
         table_location: impl Into<String>,
-    ) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
+    ) -> Result<Arc<dyn ObjectStore>> {
         let mut s3_builder = AmazonS3Builder::new();
         s3_builder = s3_builder.with_url(table_location);
         s3_builder = s3_builder.with_allow_http(true);
@@ -159,7 +160,7 @@ impl S3Credential {
 }
 
 impl OSSCredential {
-    fn build_object_store(&self) -> Result<Arc<dyn ObjectStore>, DataFusionError> {
+    fn build_object_store(&self) -> Result<Arc<dyn ObjectStore>> {
         let mut s3_builder = AmazonS3Builder::new();
         if let Some(endpoint) = &self.endpoint {
             s3_builder = s3_builder.with_endpoint(endpoint);
@@ -174,7 +175,7 @@ impl OSSCredential {
     }
 }
 
-pub fn parse_location_schema_host(path: &str) -> Result<(String, String), DataFusionError> {
+pub fn parse_location_schema_host(path: &str) -> Result<(String, String)> {
     let parsed_url = Url::parse(&path).map_err(|e| DataFusionError::External(e.into()))?;
     let url_schema = parsed_url.scheme();
     let host = if let Some(host) = parsed_url.host_str() {

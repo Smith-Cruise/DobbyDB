@@ -3,6 +3,7 @@ use crate::storage::StorageCredential;
 use crate::table_format::delta::DeltaTableProviderFactory;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
 use datafusion::catalog::TableProvider;
+use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
 use std::collections::HashMap;
@@ -16,7 +17,7 @@ impl TableProviderFactory {
         metadata_table_name: Option<&str>,
         table_properties: &HashMap<String, String>,
         catalog_config: CatalogConfig,
-    ) -> Result<Arc<dyn TableProvider>, DataFusionError> {
+    ) -> Result<Arc<dyn TableProvider>> {
         if let Some(iceberg_metadata_location) = table_properties.get("metadata_location") {
             // iceberg
             let storage_credential: Option<StorageCredential>;

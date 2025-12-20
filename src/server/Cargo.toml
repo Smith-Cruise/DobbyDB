@@ -10,5 +10,5 @@ datafusion = { workspace = true }
 datafusion-cli = { workspace = true }
 tokio = { workspace = true }
 dobbydb-catalog = { workspace = true }
-dobbydb-sql = {workspace = true}
+dobbydb-sql = { workspace = true }
 futures = { workspace = true }

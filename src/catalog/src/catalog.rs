@@ -1,13 +1,14 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
 use datafusion::catalog::CatalogProviderList;
+use datafusion::common::Result;
 use datafusion::error::DataFusionError;
+use deltalake::logstore::{logstore_factories, object_store_factories};
+use deltalake_aws::storage::S3ObjectStoreFactory;
+use deltalake_aws::S3LogStoreFactory;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
-use deltalake::logstore::{logstore_factories, object_store_factories};
-use deltalake_aws::S3LogStoreFactory;
-use deltalake_aws::storage::S3ObjectStoreFactory;
 use url::Url;
 
 #[derive(Serialize, Deserialize)]
@@ -44,7 +45,7 @@ impl CatalogManager {
         &mut self,
         catalog_name: &str,
         catalog_config: CatalogConfig,
-    ) -> Result<(), DataFusionError> {
+    ) -> Result<()> {
         if self.catalogs.contains_key(catalog_name) {
             Err(DataFusionError::Configuration(format!(
                 "Catalog {} already exists",
@@ -57,7 +58,7 @@ impl CatalogManager {
         }
     }
 
-    pub fn load_config(&mut self, config_path: &str) -> Result<(), DataFusionError> {
+    pub fn load_config(&mut self, config_path: &str) -> Result<()> {
         let config = std::fs::read_to_string(config_path)?;
         let configs: CatalogConfigs = toml::from_str(&config).map_err(|e| {
             DataFusionError::Configuration(format!("Failed to parse config: {}", e))
@@ -89,7 +90,7 @@ impl CatalogManager {
         register_something();
         Ok(())
     }
-    
+
     pub fn get_catalog(&self, catalog_name: &str) -> Option<&CatalogConfig> {
         self.catalogs.get(catalog_name)
     }
@@ -97,7 +98,7 @@ impl CatalogManager {
     pub async fn register_into_catalog_provider_list(
         &self,
         catalog_list: Arc<dyn CatalogProviderList>,
-    ) -> Result<(), DataFusionError> {
+    ) -> Result<()> {
         for (key, value) in &self.catalogs {
             match value {
                 CatalogConfig::HMS(config) => {
@@ -113,7 +114,6 @@ impl CatalogManager {
         Ok(())
     }
 }
-
 
 fn register_something() {
     {

@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
+use datafusion::common::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlueCatalogConfig {
@@ -52,7 +53,7 @@ pub struct GlueCatalog {
 }
 
 impl GlueCatalog {
-    pub async fn try_new(config: &Arc<GlueCatalogConfig>) -> Result<Self, DataFusionError> {
+    pub async fn try_new(config: &Arc<GlueCatalogConfig>) -> Result<Self> {
         let glue_client = build_glue_client(config).await;
         let mut schemas: HashMap<String, Arc<dyn SchemaProvider>> = HashMap::new();
         let dbs = glue_client
@@ -97,7 +98,7 @@ impl GlueSchema {
         glue_client: &Client,
         config: &Arc<GlueCatalogConfig>,
         schema_name: &str,
-    ) -> Result<Self, DataFusionError> {
+    ) -> Result<Self> {
         let mut table_names = HashSet::new();
         let resp = glue_client
             .get_tables()
@@ -132,7 +133,7 @@ impl SchemaProvider for GlueSchema {
     async fn table(
         &self,
         tbl_name: &str,
-    ) -> datafusion::common::Result<Option<Arc<dyn TableProvider>>, DataFusionError> {
+    ) -> Result<Option<Arc<dyn TableProvider>>> {
         let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
         if !self.table_exist(table_name) {

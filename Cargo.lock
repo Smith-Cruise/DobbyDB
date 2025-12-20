@@ -2607,10 +2607,8 @@ dependencies = [
 name = "dobbydb-sql"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "datafusion",
  "dobbydb-catalog",
- "futures",
  "sqlparser 0.58.0",
  "tokio",
 ]

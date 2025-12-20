@@ -14,6 +14,7 @@ use iceberg::inspect::MetadataTableType;
 use iceberg::table::Table;
 use std::any::Any;
 use std::sync::Arc;
+use datafusion::common::Result;
 
 #[derive(Debug, Clone)]
 pub(crate) struct IcebergMetadataTableProvider {
@@ -25,7 +26,7 @@ impl IcebergMetadataTableProvider {
     pub fn try_new(
         table: Table,
         metadata_table_name: &str,
-    ) -> Result<IcebergMetadataTableProvider, DataFusionError> {
+    ) -> Result<IcebergMetadataTableProvider> {
         let metadata_table_type = MetadataTableType::try_from(metadata_table_name)
             .map_err(|e| DataFusionError::NotImplemented(e))?;
         Ok(IcebergMetadataTableProvider {
@@ -60,7 +61,7 @@ impl TableProvider for IcebergMetadataTableProvider {
         _projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(IcebergMetadataScan::new(self.clone())))
     }
 }
@@ -68,7 +69,7 @@ impl TableProvider for IcebergMetadataTableProvider {
 impl IcebergMetadataTableProvider {
     pub async fn scan(
         self,
-    ) -> Result<BoxStream<'static, Result<RecordBatch, DataFusionError>>, DataFusionError> {
+    ) -> Result<BoxStream<'static, Result<RecordBatch>>> {
         let metadata_table = self.table.inspect();
         let stream = match self.r#type {
             MetadataTableType::Snapshots => metadata_table.snapshots().scan().await,

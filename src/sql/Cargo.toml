@@ -7,6 +7,4 @@ edition = { workspace = true }
 datafusion = { workspace = true }
 sqlparser = { workspace = true }
 tokio = { workspace = true }
-async-trait = { workspace = true }
-futures = { workspace = true }
 dobbydb-catalog = { workspace = true }

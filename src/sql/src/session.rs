@@ -2,6 +2,7 @@ use crate::parser::ExtendedParser;
 use crate::statements::ExtendedStatement;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
+use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
@@ -29,7 +30,7 @@ impl SessionManager {
     pub fn register_session(
         session_id: i64,
         session_context: Arc<SessionContext>,
-    ) -> Result<Arc<SessionContext>, DataFusionError> {
+    ) -> Result<Arc<SessionContext>> {
         let manager = get_session_manager();
         let mut map = manager
             .write()
@@ -41,7 +42,7 @@ impl SessionManager {
         }
     }
 
-    pub fn get_session(session_id: i64) -> Result<Arc<SessionContext>, DataFusionError> {
+    pub fn get_session(session_id: i64) -> Result<Arc<SessionContext>> {
         let manager = get_session_manager();
         let map = manager
             .read()
@@ -101,7 +102,7 @@ pub struct ExtendedSessionContext {
 }
 
 impl ExtendedSessionContext {
-    pub async fn new() -> Result<Self, DataFusionError> {
+    pub async fn new() -> Result<Self> {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config(session_config);
@@ -122,7 +123,7 @@ impl ExtendedSessionContext {
         Ok(Self { session_context })
     }
 
-    pub async fn sql(&self, sql: &str) -> Result<DataFrame, DataFusionError> {
+    pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
         let parser = ExtendedParser::parse_sql(sql)?;
         if parser.len() != 1 {
             return Err(DataFusionError::Execution(format!(
@@ -135,10 +136,7 @@ impl ExtendedSessionContext {
         self.create_dataframe(stmt).await
     }
 
-    pub async fn create_dataframe(
-        &self,
-        statement: &ExtendedStatement,
-    ) -> Result<DataFrame, DataFusionError> {
+    pub async fn create_dataframe(&self, statement: &ExtendedStatement) -> Result<DataFrame> {
         let sql_string: Option<String>;
         match statement {
             ExtendedStatement::ShowCatalogsStatement => {
@@ -192,7 +190,7 @@ impl ExtendedSessionContext {
         self.session_context.task_ctx()
     }
 
-    async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame, DataFusionError> {
+    async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame> {
         let (catalog_name, schema_name) = match use_stmt {
             Use::Object(object_name) => {
                 let object_name_vec = &object_name.0;

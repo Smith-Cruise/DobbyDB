@@ -1,6 +1,7 @@
 use crate::storage::parse_location_schema_host;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::memory::DataSourceExec;
+use datafusion::common::Result;
 use datafusion::config::{ConfigOptions, TableParquetOptions};
 use datafusion::datasource::listing::PartitionedFile;
 use datafusion::datasource::physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource};
@@ -51,7 +52,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
         self
     }
 
-    pub async fn build(&self) -> Result<IcebergTableScan, DataFusionError> {
+    pub async fn build(&self) -> Result<IcebergTableScan> {
         let mut iceberg_table_scan_builder = match self.snapshot_id {
             Some(snapshot_id) => self.table.scan().snapshot_id(snapshot_id),
             None => self.table.scan(),
@@ -164,14 +165,14 @@ struct IcebergDataFilePathTruncate {
 }
 
 impl IcebergDataFilePathTruncate {
-    fn try_new(path: &str) -> Result<Self, DataFusionError> {
+    fn try_new(path: &str) -> Result<Self> {
         let (schema, host) = parse_location_schema_host(path)?;
         Ok(IcebergDataFilePathTruncate {
             base_path: format!("{}://{}", schema, host),
         })
     }
 
-    fn truncate(&self, input_path: &str) -> Result<String, DataFusionError> {
+    fn truncate(&self, input_path: &str) -> Result<String> {
         match input_path.strip_prefix(&self.base_path) {
             Some(extract_path) => Ok(extract_path.to_string()),
             None => Err(DataFusionError::Internal(format!(
@@ -213,7 +214,7 @@ impl ExecutionPlan for IcebergTableScan {
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         if children.len() != 1 {
             return Err(DataFusionError::Plan(format!(
                 "wrong number of children {}",
@@ -227,7 +228,7 @@ impl ExecutionPlan for IcebergTableScan {
         &self,
         target_partitions: usize,
         config: &ConfigOptions,
-    ) -> Result<Option<Arc<dyn ExecutionPlan>>, DataFusionError> {
+    ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
         if let Some(partition_scan) = self.parquet_scan.repartitioned(target_partitions, config)? {
             Ok(Some(Arc::new(IcebergTableScan::new(partition_scan))))
         } else {
@@ -239,7 +240,7 @@ impl ExecutionPlan for IcebergTableScan {
         &self,
         partition: usize,
         context: Arc<TaskContext>,
-    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+    ) -> Result<SendableRecordBatchStream> {
         self.parquet_scan.execute(partition, context)
     }
 }

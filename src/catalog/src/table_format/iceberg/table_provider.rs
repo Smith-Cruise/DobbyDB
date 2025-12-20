@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::DataFusionError;
+use datafusion::common::Result;
 use datafusion::datasource::TableType;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
@@ -24,7 +25,7 @@ impl IcebergTableProvider {
     pub async fn try_new_from_table(
         table: Table,
         storage_credential: Option<StorageCredential>,
-    ) -> Result<Self, DataFusionError> {
+    ) -> Result<Self> {
         let schema = Arc::new(
             schema_to_arrow_schema(table.metadata().current_schema())
                 .map_err(|e| DataFusionError::External(Box::new(e)))?,
@@ -58,12 +59,14 @@ impl TableProvider for IcebergTableProvider {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         _limit: Option<usize>,
-    ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         let mut builder = IcebergTableScanBuilder::new(self.table.clone(), self.schema.clone());
         let metadata_location = if let Some(metadata_location) = self.table.metadata_location() {
             metadata_location
         } else {
-            Err(DataFusionError::Configuration("metadata location not found.".into()))?
+            Err(DataFusionError::Configuration(
+                "metadata location not found.".into(),
+            ))?
         };
         if let Some(credential) = &self.storage_credential {
             credential.register_into_session(metadata_location, state)?;
@@ -78,7 +81,7 @@ impl TableProvider for IcebergTableProvider {
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> Result<Vec<TableProviderFilterPushDown>, DataFusionError> {
+    ) -> Result<Vec<TableProviderFilterPushDown>> {
         // Push down all filters, as a single source of truth, the scanner will drop the filters which couldn't be push down
         Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
     }
