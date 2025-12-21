@@ -15,6 +15,7 @@ mod metadata_scan;
 pub mod metadata_table_provider;
 mod table_provider;
 mod table_scan;
+mod expr_to_predicate;
 
 pub struct IcebergTableProviderFactory {}
 

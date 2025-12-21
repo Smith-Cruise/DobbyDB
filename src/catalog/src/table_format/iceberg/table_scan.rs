@@ -1,4 +1,5 @@
 use crate::storage::parse_location_schema_host;
+use crate::table_format::iceberg::expr_to_predicate::convert_filters_to_predicate;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::common::Result;
@@ -65,8 +66,14 @@ impl<'a> IcebergTableScanBuilder<'a> {
             None => iceberg_table_scan_builder.select_all(),
         };
 
-        // let predicates = convert_filters_to_predicate(self.filters)?;
-        // iceberg_table_scan_builder.with_filter()
+        let iceberg_predicates = match self.filters {
+            Some(filters) => convert_filters_to_predicate(filters),
+            None => None,
+        };
+
+        if let Some(predicates) = iceberg_predicates {
+            iceberg_table_scan_builder = iceberg_table_scan_builder.with_filter(predicates)
+        }
 
         let mut iceberg_file_scan_tasks = iceberg_table_scan_builder
             .build()
