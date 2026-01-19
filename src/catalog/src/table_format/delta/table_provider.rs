@@ -22,7 +22,7 @@ impl DeltaTableProvider {
         };
         let table_url =
             Url::parse(table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let builder = DeltaTableBuilder::from_uri(table_url)
+        let builder = DeltaTableBuilder::from_url(table_url)
             .map_err(|e| DataFusionError::External(Box::new(e)))?
             .with_allow_http(true)
             .with_storage_options(storage_options);

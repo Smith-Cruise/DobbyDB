@@ -5,10 +5,12 @@ use datafusion::arrow;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::common::error::Result;
 use datafusion::error::DataFusionError;
+use datafusion_cli::object_storage::instrumented::InstrumentedObjectStoreRegistry;
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use dobbydb_catalog::catalog::get_catalog_manager;
 use dobbydb_sql::session::ExtendedSessionContext;
+use std::sync::Arc;
 
 pub struct DobbyDBServer {
     args: DobbyDBArgs,
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
         quiet: false,
         maxrows: MaxRows::Unlimited,
         color: true,
+        instrumented_registry: Arc::new(InstrumentedObjectStoreRegistry::default()),
     };
     let session_context = ExtendedSessionContext::new().await?;
     exec::exec_from_repl(&session_context, &mut print_options).await;
