@@ -3,9 +3,10 @@ use crate::table_format::iceberg::table_scan::IcebergTableScanBuilder;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::{Session, TableProvider};
-use datafusion::common::DataFusionError;
 use datafusion::common::Result;
+use datafusion::common::{DataFusionError, ToDFSchema};
 use datafusion::datasource::TableType;
+use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use iceberg::arrow::schema_to_arrow_schema;
@@ -61,6 +62,11 @@ impl TableProvider for IcebergTableProvider {
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let mut builder = IcebergTableScanBuilder::new(self.table.clone(), self.schema.clone());
+
+        let df_schema = self.schema.as_ref().clone().to_dfschema()?;
+        let predicate = conjunction(filters.iter().cloned())
+            .and_then(|predicate| state.create_physical_expr(predicate, &df_schema).ok());
+
         let metadata_location = if let Some(metadata_location) = self.table.metadata_location() {
             metadata_location
         } else {
@@ -74,7 +80,8 @@ impl TableProvider for IcebergTableProvider {
         builder = builder
             .with_snapshot_id(self.snapshot_id)
             .with_projection(projection)
-            .with_filters(Some(filters));
+            .with_filters(Some(filters))
+            .with_predicate(predicate);
         Ok(Arc::new(builder.build().await?))
     }
 

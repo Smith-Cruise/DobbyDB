@@ -1,6 +1,8 @@
 use datafusion::common::Result;
+use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::PrintOptions;
 use dobbydb_sql::session::ExtendedSessionContext;
+use futures::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Editor};
 use std::time::Instant;
@@ -93,7 +95,24 @@ async fn exec_and_print(
 ) -> Result<()> {
     let now = Instant::now();
     let df = ctx.sql(sql).await?;
-    let stream = df.execute_stream().await?;
-    print_options.print_stream(stream, now, &Default::default()).await?;
+    let format_options = ctx.task_ctx().session_config().options().format.clone();
+
+    if print_options.format == PrintFormat::Table {
+        let mut stream = df.execute_stream().await?;
+        let schema = stream.schema();
+        let mut row_count = 0_usize;
+        let mut batches = Vec::new();
+        while let Some(batch) = stream.next().await {
+            let batch = batch?;
+            row_count += batch.num_rows();
+            batches.push(batch);
+        }
+        print_options.print_batches(schema, &batches, now, row_count, &format_options)?;
+    } else {
+        let stream = df.execute_stream().await?;
+        print_options
+            .print_stream(stream, now, &format_options)
+            .await?;
+    }
     Ok(())
 }

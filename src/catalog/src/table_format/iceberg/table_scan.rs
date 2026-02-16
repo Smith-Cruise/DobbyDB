@@ -10,6 +10,7 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
 use futures::StreamExt;
 use iceberg::spec::DataFileFormat;
@@ -25,6 +26,7 @@ pub struct IcebergTableScanBuilder<'a> {
     snapshot_id: Option<i64>,
     projection: Option<&'a Vec<usize>>,
     filters: Option<&'a [Expr]>,
+    parquet_predicate: Option<Arc<dyn PhysicalExpr>>,
 }
 
 impl<'a> IcebergTableScanBuilder<'a> {
@@ -35,6 +37,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
             snapshot_id: None,
             projection: None,
             filters: None,
+            parquet_predicate: None,
         }
     }
 
@@ -50,6 +53,11 @@ impl<'a> IcebergTableScanBuilder<'a> {
 
     pub fn with_filters(mut self, filters: Option<&'a [Expr]>) -> Self {
         self.filters = filters;
+        self
+    }
+
+    pub fn with_predicate(mut self, parquet_predicate: Option<Arc<dyn PhysicalExpr>>) -> Self {
+        self.parquet_predicate = parquet_predicate;
         self
     }
 
@@ -130,9 +138,13 @@ impl<'a> IcebergTableScanBuilder<'a> {
             }
         }
 
-        // let scan_config_builder = FileScanConfigBuilder::new();
-        let parquet_options = TableParquetOptions::default();
-        let file_source = ParquetSource::new(parquet_options);
+        let mut parquet_options = TableParquetOptions::default();
+        parquet_options.global.pushdown_filters = true;
+        parquet_options.global.reorder_filters = true;
+        let mut file_source = ParquetSource::new(parquet_options);
+        if let Some(physical_predicate) = &self.parquet_predicate {
+            file_source = file_source.with_predicate(Arc::clone(physical_predicate));
+        }
 
         // 根据 projection 创建投影后的 schema
         let projected_schema = if let Some(projection) = self.projection {
