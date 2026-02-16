@@ -9,15 +9,13 @@ use std::time::Instant;
 use tokio::signal;
 
 /// run and execute SQL statements and commands against a context with the given print options
-pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &mut PrintOptions) {
+pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintOptions) {
     let mut rl: DefaultEditor = Editor::new().expect("created editor");
     // rl.set_helper(Some(CliHelper::new(
     //     &ctx.task_ctx().session_config().options().sql_parser.dialect,
     //     print_options.color,
     // )));
     rl.load_history(".history").ok();
-
-    let print_options = print_options.clone();
 
     let mut sql_buffer = String::new();
 
@@ -86,6 +84,17 @@ pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &mut Pr
     }
 
     rl.save_history(".history").ok();
+}
+
+pub async fn exec_from_commands(
+    ctx: &ExtendedSessionContext,
+    commands: Vec<String>,
+    print_options: &PrintOptions,
+) -> Result<()> {
+    for sql in commands {
+        exec_and_print(ctx, print_options, &sql).await?;
+    }
+    Ok(())
 }
 
 async fn exec_and_print(
