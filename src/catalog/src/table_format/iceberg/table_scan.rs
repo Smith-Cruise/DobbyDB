@@ -1,15 +1,21 @@
 use crate::storage::parse_location_schema_host;
 use crate::table_format::iceberg::expr_to_predicate::convert_filters_to_predicate;
-use datafusion::arrow::datatypes::Schema;
+use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::common::Result;
 use datafusion::config::{ConfigOptions, TableParquetOptions};
 use datafusion::datasource::listing::PartitionedFile;
-use datafusion::datasource::physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource};
+use datafusion::datasource::physical_plan::{
+    FileGroup, FileScanConfigBuilder, FileSource, ParquetSource,
+};
+use datafusion::datasource::schema_adapter::{
+    DefaultSchemaAdapterFactory, SchemaAdapter, SchemaAdapterFactory, SchemaMapper,
+};
 use datafusion::error::DataFusionError;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
+use datafusion::parquet::arrow::PARQUET_FIELD_ID_META_KEY;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
 use futures::StreamExt;
@@ -17,6 +23,7 @@ use iceberg::spec::DataFileFormat;
 use iceberg::table::Table;
 use iceberg_datafusion::to_datafusion_error;
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
@@ -145,6 +152,9 @@ impl<'a> IcebergTableScanBuilder<'a> {
         if let Some(physical_predicate) = &self.parquet_predicate {
             file_source = file_source.with_predicate(Arc::clone(physical_predicate));
         }
+        let file_source = file_source.with_schema_adapter_factory(Arc::new(
+            IcebergFieldIdSchemaAdapterFactory
+        ))?;
 
         // 根据 projection 创建投影后的 schema
         let projected_schema = if let Some(projection) = self.projection {
@@ -160,7 +170,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
         let file_scan_config = FileScanConfigBuilder::new(
             ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?,
             projected_schema,
-            Arc::new(file_source),
+            file_source,
         )
         .with_file_group(FileGroup::new(partition_fields))
         .build();
@@ -177,6 +187,106 @@ fn get_column_names(schema: Arc<Schema>, projection: Option<&Vec<usize>>) -> Opt
             .map(|p| schema.field(*p).name().clone())
             .collect::<Vec<String>>()
     })
+}
+
+#[derive(Debug, Default)]
+struct IcebergFieldIdSchemaAdapterFactory;
+
+impl SchemaAdapterFactory for IcebergFieldIdSchemaAdapterFactory {
+    fn create(
+        &self,
+        projected_table_schema: SchemaRef,
+        _table_schema: SchemaRef,
+    ) -> Box<dyn SchemaAdapter> {
+        Box::new(IcebergFieldIdSchemaAdapter {
+            projected_table_schema,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct IcebergFieldIdSchemaAdapter {
+    projected_table_schema: SchemaRef,
+}
+
+impl IcebergFieldIdSchemaAdapter {
+    fn get_field_id(field: &Field) -> Result<Option<i32>> {
+        match field.metadata().get(PARQUET_FIELD_ID_META_KEY) {
+            Some(raw_value) => raw_value.parse::<i32>().map(Some).map_err(|e| {
+                DataFusionError::Execution(format!(
+                    "failed to parse `{}` metadata `{}` to i32 for field `{}`: {}",
+                    PARQUET_FIELD_ID_META_KEY,
+                    raw_value,
+                    field.name(),
+                    e
+                ))
+            }),
+            None => Ok(None),
+        }
+    }
+
+    fn table_field_id_to_name(&self) -> Result<HashMap<i32, String>> {
+        let mut field_id_to_name = HashMap::with_capacity(self.projected_table_schema.fields.len());
+        for field in &self.projected_table_schema.fields {
+            let field_id = Self::get_field_id(field)?.ok_or_else(|| {
+                DataFusionError::Execution(format!(
+                    "projected table field `{}` is missing `{}` metadata",
+                    field.name(),
+                    PARQUET_FIELD_ID_META_KEY
+                ))
+            })?;
+            field_id_to_name.insert(field_id, field.name().clone());
+        }
+        Ok(field_id_to_name)
+    }
+}
+
+impl SchemaAdapter for IcebergFieldIdSchemaAdapter {
+    fn map_column_index(&self, index: usize, file_schema: &Schema) -> Option<usize> {
+        let table_field = self.projected_table_schema.field(index);
+        let table_field_id = Self::get_field_id(table_field).ok().flatten()?;
+
+        for (file_idx, file_field) in file_schema.fields.iter().enumerate() {
+            if Self::get_field_id(file_field).ok().flatten() == Some(table_field_id) {
+                return Some(file_idx);
+            }
+        }
+        None
+    }
+
+    fn map_schema(
+        &self,
+        file_schema: &Schema,
+    ) -> Result<(Arc<dyn SchemaMapper>, Vec<usize>)> {
+        let table_field_id_to_name = self.table_field_id_to_name()?;
+        let mut seen_file_field_ids: HashMap<i32, String> = HashMap::new();
+        let mut remapped_file_fields = Vec::with_capacity(file_schema.fields.len());
+
+        for file_field in &file_schema.fields {
+            let mut remapped_field = file_field.as_ref().clone();
+            if let Some(file_field_id) = Self::get_field_id(file_field)? {
+                if let Some(existing_name) =
+                    seen_file_field_ids.insert(file_field_id, file_field.name().clone())
+                {
+                    return Err(DataFusionError::Execution(format!(
+                        "duplicate field_id {} found in file schema for fields `{}` and `{}`",
+                        file_field_id,
+                        existing_name,
+                        file_field.name()
+                    )));
+                }
+                if let Some(table_field_name) = table_field_id_to_name.get(&file_field_id) {
+                    remapped_field = remapped_field.with_name(table_field_name.clone());
+                }
+            }
+            remapped_file_fields.push(remapped_field);
+        }
+
+        let remapped_file_schema = Schema::new(remapped_file_fields);
+        let delegate =
+            DefaultSchemaAdapterFactory.create_with_projected_schema(self.projected_table_schema.clone());
+        delegate.map_schema(&remapped_file_schema)
+    }
 }
 
 struct IcebergDataFilePathTruncate {
@@ -273,6 +383,16 @@ impl DisplayAs for IcebergTableScan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datafusion::arrow::array::{Array, Int32Array, RecordBatch};
+    use datafusion::arrow::datatypes::{DataType, Field};
+    use std::collections::HashMap;
+
+    fn field_with_id(name: &str, data_type: DataType, field_id: i32) -> Field {
+        Field::new(name, data_type, true).with_metadata(HashMap::from([(
+            PARQUET_FIELD_ID_META_KEY.to_string(),
+            field_id.to_string(),
+        )]))
+    }
 
     #[test]
     fn test_iceberg_data_file_path_truncate() {
@@ -286,5 +406,89 @@ mod tests {
             "/hive/2.parquet",
             truncate.truncate("s3://warehouse/hive/2.parquet").unwrap()
         );
+    }
+
+    #[test]
+    fn test_field_id_rename_maps_correctly() {
+        let adapter = IcebergFieldIdSchemaAdapter {
+            projected_table_schema: Arc::new(Schema::new(vec![
+                field_with_id("new_name", DataType::Int32, 2),
+                field_with_id("qty", DataType::Int32, 3),
+            ])),
+        };
+
+        let file_schema = Schema::new(vec![
+            field_with_id("old_name", DataType::Int32, 2),
+            field_with_id("qty", DataType::Int32, 3),
+        ]);
+
+        assert_eq!(Some(0), adapter.map_column_index(0, &file_schema));
+        let (mapper, projection) = adapter.map_schema(&file_schema).unwrap();
+        assert_eq!(vec![0, 1], projection);
+
+        let batch = RecordBatch::try_new(
+            Arc::new(file_schema),
+            vec![
+                Arc::new(Int32Array::from(vec![10, 20])),
+                Arc::new(Int32Array::from(vec![1, 2])),
+            ],
+        )
+        .unwrap();
+
+        let mapped = mapper.map_batch(batch).unwrap();
+        assert_eq!(2, mapped.num_columns());
+        assert_eq!("new_name", mapped.schema().field(0).name());
+        assert_eq!(
+            vec![10, 20],
+            mapped
+                .column(0)
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .unwrap()
+                .values()
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn test_missing_field_id_in_file_results_in_null_column() {
+        let adapter = IcebergFieldIdSchemaAdapter {
+            projected_table_schema: Arc::new(Schema::new(vec![
+                field_with_id("id", DataType::Int32, 1),
+                field_with_id("extra", DataType::Int32, 2),
+            ])),
+        };
+        let file_schema = Schema::new(vec![field_with_id("id", DataType::Int32, 1)]);
+
+        assert_eq!(None, adapter.map_column_index(1, &file_schema));
+        let (mapper, projection) = adapter.map_schema(&file_schema).unwrap();
+        assert_eq!(vec![0], projection);
+
+        let batch = RecordBatch::try_new(
+            Arc::new(file_schema),
+            vec![Arc::new(Int32Array::from(vec![1, 2]))],
+        )
+        .unwrap();
+        let mapped = mapper.map_batch(batch).unwrap();
+
+        let extra = mapped.column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+        assert!(extra.is_null(0));
+        assert!(extra.is_null(1));
+    }
+
+    #[test]
+    fn test_missing_field_id_in_table_schema_returns_error() {
+        let adapter = IcebergFieldIdSchemaAdapter {
+            projected_table_schema: Arc::new(Schema::new(vec![Field::new(
+                "id",
+                DataType::Int32,
+                true,
+            )])),
+        };
+        let file_schema = Schema::new(vec![field_with_id("id", DataType::Int32, 1)]);
+        let err = adapter.map_schema(&file_schema).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is missing `PARQUET:field_id` metadata"));
     }
 }
