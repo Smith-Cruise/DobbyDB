@@ -5,9 +5,9 @@ use datafusion::catalog::memory::DataSourceExec;
 use datafusion::common::Result;
 use datafusion::config::{ConfigOptions, TableParquetOptions};
 use datafusion::datasource::listing::PartitionedFile;
-use datafusion::datasource::physical_plan::{
-    FileGroup, FileScanConfigBuilder, FileSource, ParquetSource,
-};
+#[allow(unused_imports)]
+use datafusion::datasource::physical_plan::FileSource;
+use datafusion::datasource::physical_plan::{FileGroup, FileScanConfigBuilder, ParquetSource};
 use datafusion::datasource::schema_adapter::{
     DefaultSchemaAdapterFactory, SchemaAdapter, SchemaAdapterFactory, SchemaMapper,
 };
@@ -152,9 +152,9 @@ impl<'a> IcebergTableScanBuilder<'a> {
         if let Some(physical_predicate) = &self.parquet_predicate {
             file_source = file_source.with_predicate(Arc::clone(physical_predicate));
         }
-        let file_source = file_source.with_schema_adapter_factory(Arc::new(
-            IcebergFieldIdSchemaAdapterFactory
-        ))?;
+        // let file_source = file_source.with_schema_adapter_factory(Arc::new(
+        //     IcebergFieldIdSchemaAdapterFactory
+        // ))?;
 
         // 根据 projection 创建投影后的 schema
         let projected_schema = if let Some(projection) = self.projection {
@@ -170,7 +170,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
         let file_scan_config = FileScanConfigBuilder::new(
             ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?,
             projected_schema,
-            file_source,
+            Arc::new(file_source),
         )
         .with_file_group(FileGroup::new(partition_fields))
         .build();
@@ -189,6 +189,7 @@ fn get_column_names(schema: Arc<Schema>, projection: Option<&Vec<usize>>) -> Opt
     })
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct IcebergFieldIdSchemaAdapterFactory;
 
@@ -204,6 +205,7 @@ impl SchemaAdapterFactory for IcebergFieldIdSchemaAdapterFactory {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct IcebergFieldIdSchemaAdapter {
     projected_table_schema: SchemaRef,
@@ -254,10 +256,7 @@ impl SchemaAdapter for IcebergFieldIdSchemaAdapter {
         None
     }
 
-    fn map_schema(
-        &self,
-        file_schema: &Schema,
-    ) -> Result<(Arc<dyn SchemaMapper>, Vec<usize>)> {
+    fn map_schema(&self, file_schema: &Schema) -> Result<(Arc<dyn SchemaMapper>, Vec<usize>)> {
         let table_field_id_to_name = self.table_field_id_to_name()?;
         let mut seen_file_field_ids: HashMap<i32, String> = HashMap::new();
         let mut remapped_file_fields = Vec::with_capacity(file_schema.fields.len());
@@ -283,8 +282,8 @@ impl SchemaAdapter for IcebergFieldIdSchemaAdapter {
         }
 
         let remapped_file_schema = Schema::new(remapped_file_fields);
-        let delegate =
-            DefaultSchemaAdapterFactory.create_with_projected_schema(self.projected_table_schema.clone());
+        let delegate = DefaultSchemaAdapterFactory
+            .create_with_projected_schema(self.projected_table_schema.clone());
         delegate.map_schema(&remapped_file_schema)
     }
 }
@@ -471,7 +470,11 @@ mod tests {
         .unwrap();
         let mapped = mapper.map_batch(batch).unwrap();
 
-        let extra = mapped.column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+        let extra = mapped
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
         assert!(extra.is_null(0));
         assert!(extra.is_null(1));
     }
@@ -487,8 +490,9 @@ mod tests {
         };
         let file_schema = Schema::new(vec![field_with_id("id", DataType::Int32, 1)]);
         let err = adapter.map_schema(&file_schema).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("is missing `PARQUET:field_id` metadata"));
+        assert!(
+            err.to_string()
+                .contains("is missing `PARQUET:field_id` metadata")
+        );
     }
 }
