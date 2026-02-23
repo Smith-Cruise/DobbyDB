@@ -15,9 +15,9 @@ impl DeltaTableProviderFactory {
         table_location: &str,
         storage_credential: Option<StorageCredential>,
     ) -> Result<Arc<dyn TableProvider>> {
-        let delta_table_provider =
+        let table_provider =
             DeltaTableProvider::try_new(table_reference, table_location, storage_credential)
                 .await?;
-        Ok(Arc::new(delta_table_provider))
+        Ok(Arc::new(table_provider))
     }
 }
