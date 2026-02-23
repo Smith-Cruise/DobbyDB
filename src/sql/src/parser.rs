@@ -189,13 +189,26 @@ impl<'a> ExtendedParser<'a> {
 mod tests {
     use super::*;
     use crate::statements::ExtendedStatement::SQLStatement;
-    use sqlparser::ast::{ShowStatementOptions, Statement};
+    use sqlparser::ast::{Ident, ObjectName, ObjectNamePart, ShowStatementOptions, Statement, Use};
 
     #[test]
     fn test_show_catalogs() -> Result<()> {
         let statement = ExtendedParser::parse_sql("show catalogs")?;
         let stmt = &statement[0];
         assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_use_catalog() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("use catalog test")?;
+        let stmt = &statement[0];
+        let use_statement =
+            Statement::Use(Use::Catalog(ObjectName(vec![ObjectNamePart::Identifier(
+                Ident::new("test"),
+            )])));
+        let expected = ExtendedStatement::SQLStatement(Box::new(use_statement));
+        assert_eq!(expected, *stmt);
         Ok(())
     }
 
