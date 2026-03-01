@@ -3360,7 +3360,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/Smith-Cruise/iceberg-rust.git?rev=204347a8e81c35baa76c3ec21346a2b708800891#204347a8e81c35baa76c3ec21346a2b708800891"
+source = "git+https://github.com/apache/iceberg-rust.git?rev=01a6a431d641202d6428f7d3af1e8ce27985e3a2#01a6a431d641202d6428f7d3af1e8ce27985e3a2"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -3415,7 +3415,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://github.com/Smith-Cruise/iceberg-rust.git?rev=204347a8e81c35baa76c3ec21346a2b708800891#204347a8e81c35baa76c3ec21346a2b708800891"
+source = "git+https://github.com/apache/iceberg-rust.git?rev=01a6a431d641202d6428f7d3af1e8ce27985e3a2#01a6a431d641202d6428f7d3af1e8ce27985e3a2"
 dependencies = [
  "anyhow",
  "async-trait",

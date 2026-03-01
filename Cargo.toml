@@ -20,8 +20,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.5"
 futures = "0.3.31"
 async-trait = "0.1.88"
-iceberg = { git = "https://github.com/Smith-Cruise/iceberg-rust.git", rev = "204347a8e81c35baa76c3ec21346a2b708800891", features = ["storage-oss", "storage-s3"]}
-iceberg-datafusion = { git = "https://github.com/Smith-Cruise/iceberg-rust.git", rev = "204347a8e81c35baa76c3ec21346a2b708800891", package = "iceberg-datafusion" }
+iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "01a6a431d641202d6428f7d3af1e8ce27985e3a2", features = ["storage-oss", "storage-s3"]}
+iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "01a6a431d641202d6428f7d3af1e8ce27985e3a2", package = "iceberg-datafusion" }
 #iceberg = { version = "0.8.0", features = ["storage-oss", "storage-s3"] }
 #iceberg-datafusion = "0.8.0"
 deltalake = { version = "0.31.0", features = ["datafusion", "s3"] }
