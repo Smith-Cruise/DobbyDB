@@ -25,8 +25,8 @@ pub struct DeltaTableProvider {
 
 impl DeltaTableProvider {
     pub async fn try_new(
-        _table_reference: &TableReference,
-        table_location: &str,
+        _table_reference: TableReference,
+        table_location: String,
         storage_credential: Option<StorageCredential>,
     ) -> Result<Self> {
         let storage_options = if let Some(storage_credential) = &storage_credential {
@@ -35,7 +35,7 @@ impl DeltaTableProvider {
             HashMap::new()
         };
         let table_url =
-            Url::parse(table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
+            Url::parse(&table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let builder = DeltaTableBuilder::from_url(table_url)
             .map_err(|e| DataFusionError::External(Box::new(e)))?
             .with_allow_http(true)

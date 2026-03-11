@@ -21,9 +21,9 @@ pub struct IcebergTableProviderFactory {}
 
 impl IcebergTableProviderFactory {
     pub async fn try_create_table_provider(
-        metadata_location: &str,
-        table_reference: &TableReference,
-        metadata_table_name: Option<&str>,
+        table_reference: TableReference,
+        metadata_location: String,
+        metadata_table_name: Option<String>,
         storage_credential: Option<StorageCredential>,
     ) -> Result<Arc<dyn TableProvider>> {
         let schema_name: String;
@@ -46,7 +46,7 @@ impl IcebergTableProviderFactory {
         } else {
             HashMap::new()
         };
-        let file_io = FileIO::from_path(metadata_location)
+        let file_io = FileIO::from_path(&metadata_location)
             .map_err(|e| DataFusionError::External(Box::new(e)))?
             .with_props(file_io_properties)
             .build()
@@ -58,12 +58,12 @@ impl IcebergTableProviderFactory {
         };
 
         let iceberg_table =
-            StaticTable::from_metadata_file(metadata_location, iceberg_identifier, file_io)
+            StaticTable::from_metadata_file(&metadata_location, iceberg_identifier, file_io)
                 .await
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
                 .into_table();
 
-        if let Some(metadata_table_name) = metadata_table_name {
+        if let Some(metadata_table_name) = &metadata_table_name {
             let metadata_table_provider =
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_name)?;
             Ok(Arc::new(metadata_table_provider))

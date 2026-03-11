@@ -1,7 +1,7 @@
-mod table_provider;
+mod delta_table_provider;
 
 use crate::storage::StorageCredential;
-use crate::table_format::delta::table_provider::DeltaTableProvider;
+use crate::table_format::delta::delta_table_provider::DeltaTableProvider;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::common::TableReference;
@@ -11,8 +11,8 @@ pub struct DeltaTableProviderFactory {}
 
 impl DeltaTableProviderFactory {
     pub async fn try_create_table_provider(
-        table_reference: &TableReference,
-        table_location: &str,
+        table_reference: TableReference,
+        table_location: String,
         storage_credential: Option<StorageCredential>,
     ) -> Result<Arc<dyn TableProvider>> {
         let table_provider =
