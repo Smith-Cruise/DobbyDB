@@ -16,7 +16,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+      
+    - name: Clippy check
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --all-targets --all-features --verbose
