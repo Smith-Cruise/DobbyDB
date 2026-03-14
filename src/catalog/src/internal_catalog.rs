@@ -1,4 +1,4 @@
-use crate::catalog::{get_catalog_manager, CatalogConfig};
+use crate::catalog::{CatalogConfig, get_catalog_manager};
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
@@ -55,10 +55,7 @@ impl InternalCatalog {
     }
 
     fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
-        Ok(StreamingTable::try_new(
-            Arc::clone(&table.schema()),
-            vec![table],
-        )?)
+        StreamingTable::try_new(table.schema().clone(), vec![table])
     }
 }
 

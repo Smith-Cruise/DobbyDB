@@ -56,7 +56,7 @@ pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintO
 
                     tokio::select! {
                         // 这里可以添加实际执行 SQL 的逻辑
-                        res = exec_and_print(&ctx, &print_options, sql) => match res {
+                        res = exec_and_print(ctx, print_options, sql) => match res {
                             Ok(_) => {}
                             Err(err) => eprintln!("{err}"),
                         },

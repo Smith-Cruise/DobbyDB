@@ -1,6 +1,10 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
+use crate::table_format::TableFormat;
 use crate::table_format::delta::DeltaTableProviderFactory;
+use crate::table_format::hive::HiveTableProviderFactory;
+use crate::table_format::hive::hive_partition::HivePartition;
+use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
@@ -9,61 +13,104 @@ use datafusion::sql::TableReference;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(crate) struct TableProviderFactory {}
+pub struct TableProviderBuilder {
+    table_reference: TableReference,
+    table_properties: HashMap<String, String>,
+    metadata_table_name: Option<String>,
+    hive_storage_info: Option<HiveStorageInfo>,
+    hive_partitions: Option<Vec<HivePartition>>,
+    storage_credential: Option<StorageCredential>,
+}
 
-impl TableProviderFactory {
-    pub async fn try_new_table_provider(
-        table_reference: &TableReference,
-        metadata_table_name: Option<&str>,
-        table_properties: &HashMap<String, String>,
+impl TableProviderBuilder {
+    pub fn new(
+        table_reference: TableReference,
+        table_properties: HashMap<String, String>,
         catalog_config: CatalogConfig,
-    ) -> Result<Arc<dyn TableProvider>> {
-        if let Some(iceberg_metadata_location) = table_properties.get("metadata_location") {
-            // iceberg
-            let storage_credential: Option<StorageCredential>;
-            match catalog_config {
-                CatalogConfig::GLUE(glue_config) => {
-                    storage_credential = glue_config.storage_credential.clone();
-                }
-                CatalogConfig::HMS(hms_config) => {
-                    storage_credential = hms_config.storage_credential.clone();
-                }
-            }
-            return IcebergTableProviderFactory::try_create_table_provider(
-                iceberg_metadata_location,
-                table_reference,
-                metadata_table_name,
-                storage_credential,
-            )
-            .await;
+    ) -> Self {
+        let storage_credential = match catalog_config {
+            CatalogConfig::GLUE(glue_config) => glue_config.storage_credential.clone(),
+            CatalogConfig::HMS(hms_config) => hms_config.storage_credential.clone(),
+        };
+        Self {
+            table_reference,
+            table_properties,
+            metadata_table_name: None,
+            hive_storage_info: None,
+            hive_partitions: None,
+            storage_credential,
         }
+    }
 
-        if let Some(spark_provider) = table_properties.get("spark.sql.sources.provider") {
-            if let Some(table_location) = table_properties.get("location") {
-                if spark_provider == "DELTA" {
-                    // delta
-                    let storage_credential: Option<StorageCredential>;
-                    match catalog_config {
-                        CatalogConfig::GLUE(glue_config) => {
-                            storage_credential = glue_config.storage_credential.clone();
-                        }
-                        CatalogConfig::HMS(hms_config) => {
-                            storage_credential = hms_config.storage_credential.clone();
-                        }
-                    }
-                    return DeltaTableProviderFactory::try_create_table_provider(
-                        table_reference,
-                        table_location,
-                        storage_credential,
+    pub fn with_table_metadata_table_name(mut self, metadata_table_name: Option<String>) -> Self {
+        self.metadata_table_name = metadata_table_name;
+        self
+    }
+
+    pub fn with_hive_storage_info(mut self, hive_storage_info: HiveStorageInfo) -> Self {
+        self.hive_storage_info = Some(hive_storage_info);
+        self
+    }
+
+    pub fn with_hive_partitions(mut self, hive_partitions: Vec<HivePartition>) -> Self {
+        self.hive_partitions = Some(hive_partitions);
+        self
+    }
+
+    pub async fn build(self) -> Result<Arc<dyn TableProvider>> {
+        match self.deduce_table_format()? {
+            TableFormat::Iceberg => {
+                let iceberg_metadata_location =
+                    self.table_properties.get("metadata_location").ok_or(
+                        DataFusionError::Internal("metadata_location not existed".into()),
+                    )?;
+                IcebergTableProviderFactory::try_create_table_provider(
+                    self.table_reference,
+                    iceberg_metadata_location.clone(),
+                    self.metadata_table_name,
+                    self.storage_credential,
+                )
+                .await
+            }
+            TableFormat::Delta => {
+                let table_location = self
+                    .table_properties
+                    .get("location")
+                    .ok_or(DataFusionError::Internal("location not existed".into()))?;
+                DeltaTableProviderFactory::try_create_table_provider(
+                    self.table_reference,
+                    table_location.clone(),
+                    self.storage_credential,
+                )
+                .await
+            }
+            TableFormat::Hive => match (self.hive_storage_info, self.hive_partitions) {
+                (Some(storage_info), Some(partitions)) => {
+                    HiveTableProviderFactory::try_create_table_provider(
+                        storage_info,
+                        partitions,
+                        self.storage_credential,
                     )
-                    .await;
                 }
-            }
+                _ => Err(DataFusionError::Internal(
+                    "hive_storage_info or hive_partitions not existed".into(),
+                )),
+            },
+        }
+    }
+
+    pub fn deduce_table_format(&self) -> Result<TableFormat> {
+        if self.table_properties.contains_key("metadata_location") {
+            return Ok(TableFormat::Iceberg);
+        }
+        if let Some(spark_provider) = self.table_properties.get("spark.sql.sources.provider")
+            && spark_provider == "DELTA"
+        {
+            return Ok(TableFormat::Delta);
         }
 
-        Err(DataFusionError::NotImplemented(
-            "not implemented table format".to_string(),
-        ))
+        // other table format fallback to hive format
+        Ok(TableFormat::Hive)
     }
 }
 

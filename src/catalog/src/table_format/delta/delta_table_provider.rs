@@ -8,13 +8,13 @@ use datafusion::error::DataFusionError;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use deltalake::delta_datafusion::DeltaScanNext;
-use deltalake::logstore::{LogStore, LogStoreRef};
 use deltalake::DeltaTableBuilder;
+use deltalake::delta_datafusion::DeltaScanNext;
+use deltalake::delta_datafusion::engine::AsObjectStoreUrl;
+use deltalake::logstore::{LogStore, LogStoreRef};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use deltalake::delta_datafusion::engine::AsObjectStoreUrl;
 use url::Url;
 
 #[derive(Debug)]
@@ -25,8 +25,8 @@ pub struct DeltaTableProvider {
 
 impl DeltaTableProvider {
     pub async fn try_new(
-        _table_reference: &TableReference,
-        table_location: &str,
+        _table_reference: TableReference,
+        table_location: String,
         storage_credential: Option<StorageCredential>,
     ) -> Result<Self> {
         let storage_options = if let Some(storage_credential) = &storage_credential {
@@ -35,7 +35,7 @@ impl DeltaTableProvider {
             HashMap::new()
         };
         let table_url =
-            Url::parse(table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
+            Url::parse(&table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let builder = DeltaTableBuilder::from_url(table_url)
             .map_err(|e| DataFusionError::External(Box::new(e)))?
             .with_allow_http(true)

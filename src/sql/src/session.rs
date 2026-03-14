@@ -7,13 +7,13 @@ use datafusion::common::TableReference;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
-use datafusion::logical_expr::sqlparser::ast::{Statement, Use};
 use datafusion::logical_expr::LogicalPlanBuilder;
+use datafusion::logical_expr::sqlparser::ast::{Statement, Use};
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::get_catalog_manager;
+use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider};
 use dobbydb_catalog::internal_catalog::{
-    InternalCatalog, INFORMATION_SCHEMA_SHOW_CATALOGS,
-    INFORMATION_SCHEMA_SHOW_SCHEMAS, INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG,
+    INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
+    INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG, InternalCatalog,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -108,9 +108,8 @@ impl ExtendedSessionContext {
         let session_context = SessionContext::new_with_config(session_config);
         let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
 
-        let catalog_manager = get_catalog_manager().read().unwrap();
-        catalog_manager
-            .register_into_catalog_provider_list(memory_catalog_provider_list.clone())
+        let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
+        register_catalogs_into_catalog_provider(memory_catalog_provider_list.clone(), all_catalogs)
             .await?;
 
         // load internal catalog
@@ -149,7 +148,7 @@ impl ExtendedSessionContext {
             }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
-                    return self.handle_use_stmt(&use_stmt).await;
+                    return self.handle_use_stmt(use_stmt).await;
                 }
                 Statement::ShowSchemas { .. } => {
                     sql_string = Some(
@@ -162,14 +161,14 @@ impl ExtendedSessionContext {
                     );
                 }
                 Statement::ShowTables { .. } => {
-                    sql_string = Some(String::from(
+                    sql_string = Some(
                         ScanVirtualTableSqlBuilder::new_with_table_reference(
                             TableReference::Bare {
                                 table: Arc::from(INFORMATION_SCHEMA_SHOW_TABLES),
                             },
                         )
                         .build_sql(),
-                    ));
+                    );
                 }
                 _ => {
                     sql_string = Some(stmt.to_string());
@@ -210,10 +209,10 @@ impl ExtendedSessionContext {
                         Some(object_name_vec[1].to_string()),
                     ),
                     _ => {
-                        return Err(DataFusionError::Plan(String::from(format!(
+                        return Err(DataFusionError::Plan(format!(
                             "unsupported use stmt {:?}",
                             use_stmt
-                        ))));
+                        )));
                     }
                 }
             }
@@ -222,20 +221,20 @@ impl ExtendedSessionContext {
                 (object_name_vec[0].to_string(), None)
             }
             _ => {
-                return Err(DataFusionError::Plan(String::from(format!(
+                return Err(DataFusionError::Plan(format!(
                     "unsupported use stmt {:?}",
                     use_stmt
-                ))));
+                )));
             }
         };
 
         let catalog_provider = match self.session_context.catalog(&catalog_name) {
             Some(catalog_provider) => catalog_provider,
             None => {
-                return Err(DataFusionError::Plan(String::from(format!(
+                return Err(DataFusionError::Plan(format!(
                     "unknown catalog {}",
                     catalog_name
-                ))));
+                )));
             }
         };
 
@@ -248,14 +247,11 @@ impl ExtendedSessionContext {
             .default_catalog = catalog_name.clone();
 
         if let Some(schema_name) = schema_name {
-            match catalog_provider.schema(&schema_name) {
-                None => {
-                    return Err(DataFusionError::Plan(String::from(format!(
-                        "unknown schema {}",
-                        schema_name
-                    ))));
-                }
-                _ => {}
+            if catalog_provider.schema(&schema_name).is_none() {
+                return Err(DataFusionError::Plan(format!(
+                    "unknown schema {}",
+                    schema_name
+                )));
             }
 
             state

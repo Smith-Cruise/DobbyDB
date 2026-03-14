@@ -4,8 +4,8 @@ use datafusion::catalog::CatalogProviderList;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use deltalake::logstore::{logstore_factories, object_store_factories};
-use deltalake_aws::storage::S3ObjectStoreFactory;
 use deltalake_aws::S3LogStoreFactory;
+use deltalake_aws::storage::S3ObjectStoreFactory;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -17,7 +17,7 @@ struct CatalogConfigs {
     glue: Option<Vec<GlueCatalogConfig>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CatalogConfig {
     HMS(HMSCatalogConfig),
     GLUE(GlueCatalogConfig),
@@ -26,21 +26,15 @@ pub enum CatalogConfig {
 static CATALOG_MANAGER: OnceLock<RwLock<CatalogManager>> = OnceLock::new();
 
 pub fn get_catalog_manager() -> &'static RwLock<CatalogManager> {
-    CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::new()))
+    CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::default()))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CatalogManager {
     catalogs: HashMap<String, CatalogConfig>,
 }
 
 impl CatalogManager {
-    pub fn new() -> CatalogManager {
-        CatalogManager {
-            catalogs: HashMap::new(),
-        }
-    }
-
     fn register_catalog(
         &mut self,
         catalog_name: &str,
@@ -64,29 +58,21 @@ impl CatalogManager {
             DataFusionError::Configuration(format!("Failed to parse config: {}", e))
         })?;
 
-        match &configs.hms {
-            Some(catalogs) => {
-                for hms_catalog in catalogs {
-                    self.register_catalog(
-                        &hms_catalog.name,
-                        CatalogConfig::HMS(hms_catalog.clone()),
-                    )?;
-                }
+        if let Some(catalogs) = configs.hms {
+            for hms_catalog in catalogs {
+                self.register_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
             }
-            _ => {}
         }
 
-        match &configs.glue {
-            Some(catalogs) => {
-                for glue_catalog in catalogs {
-                    self.register_catalog(
-                        &glue_catalog.name,
-                        CatalogConfig::GLUE(glue_catalog.clone()),
-                    )?;
-                }
+        if let Some(catalogs) = configs.glue {
+            for glue_catalog in catalogs {
+                self.register_catalog(
+                    &glue_catalog.name,
+                    CatalogConfig::GLUE(glue_catalog.clone()),
+                )?;
             }
-            None => {}
         }
+
         register_something();
         Ok(())
     }
@@ -95,24 +81,31 @@ impl CatalogManager {
         self.catalogs.get(catalog_name)
     }
 
-    pub async fn register_into_catalog_provider_list(
-        &self,
-        catalog_list: Arc<dyn CatalogProviderList>,
-    ) -> Result<()> {
-        for (key, value) in &self.catalogs {
-            match value {
-                CatalogConfig::HMS(config) => {
-                    let hms_catalog = HMSCatalog::try_new(&Arc::new(config.clone())).await?;
-                    catalog_list.register_catalog(key.to_string(), Arc::new(hms_catalog));
-                }
-                CatalogConfig::GLUE(config) => {
-                    let glue_catalog = GlueCatalog::try_new(&Arc::new(config.clone())).await?;
-                    catalog_list.register_catalog(key.to_string(), Arc::new(glue_catalog));
-                }
+    pub fn get_all_catalogs(&self) -> Vec<(String, CatalogConfig)> {
+        self.catalogs
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
+
+pub async fn register_catalogs_into_catalog_provider(
+    catalog_provider: Arc<dyn CatalogProviderList>,
+    catalogs: Vec<(String, CatalogConfig)>,
+) -> Result<()> {
+    for (key, value) in catalogs {
+        match value {
+            CatalogConfig::HMS(config) => {
+                let hms_catalog = HMSCatalog::try_new(&Arc::new(config)).await?;
+                catalog_provider.register_catalog(key, Arc::new(hms_catalog));
+            }
+            CatalogConfig::GLUE(config) => {
+                let glue_catalog = GlueCatalog::try_new(&Arc::new(config)).await?;
+                catalog_provider.register_catalog(key, Arc::new(glue_catalog));
             }
         }
-        Ok(())
     }
+    Ok(())
 }
 
 fn register_something() {

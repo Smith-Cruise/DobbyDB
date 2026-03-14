@@ -1,11 +1,12 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
-use crate::table_format::table_provider_factory::{split_table_name, TableProviderFactory};
+use crate::table_format::table_provider_factory::{TableProviderBuilder, split_table_name};
 use async_trait::async_trait;
 use aws_config::Region;
-use aws_sdk_glue::config::Credentials;
 use aws_sdk_glue::Client;
+use aws_sdk_glue::config::Credentials;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
+use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use iceberg::inspect::MetadataTableType;
@@ -15,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
-use datafusion::common::Result;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlueCatalogConfig {
@@ -42,8 +42,7 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
         aws_config = aws_config.region(Region::new(region.clone()));
     }
     let aws_config = aws_config.load().await;
-    let glue_client = Client::new(&aws_config);
-    glue_client
+    Client::new(&aws_config)
 }
 
 #[derive(Debug)]
@@ -130,11 +129,8 @@ impl SchemaProvider for GlueSchema {
         self.table_names.iter().cloned().collect()
     }
 
-    async fn table(
-        &self,
-        tbl_name: &str,
-    ) -> Result<Option<Arc<dyn TableProvider>>> {
-        let (table_name, metadata_table_name) = split_table_name(tbl_name);
+    async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
+        let (table_name, _metadata_table_name) = split_table_name(tbl_name);
 
         if !self.table_exist(table_name) {
             return Ok(None);
@@ -160,21 +156,21 @@ impl SchemaProvider for GlueSchema {
             glue_table.name.as_str(),
         );
         let glue_table_properties = match &glue_table.parameters {
-            Some(parameters) => parameters,
+            Some(parameters) => parameters.clone(),
             None => {
                 return Err(DataFusionError::Internal(
                     "glue table's parameters are missing".to_string(),
                 ));
             }
         };
-        let table_provider = TableProviderFactory::try_new_table_provider(
-            &table_reference,
-            metadata_table_name,
+
+        let table_provider_builder = TableProviderBuilder::new(
+            table_reference,
             glue_table_properties,
             CatalogConfig::GLUE(self.config.deref().clone()),
-        )
-        .await?;
-        Ok(Some(table_provider))
+        );
+
+        Ok(Some(table_provider_builder.build().await?))
     }
 
     fn table_exist(&self, name: &str) -> bool {

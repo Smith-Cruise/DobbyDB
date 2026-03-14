@@ -152,15 +152,12 @@ impl<'a> ExtendedParser<'a> {
 
     fn parse_show(&mut self) -> Result<ExtendedStatement> {
         let token = self.parser.peek_token();
-        match &token.token {
-            Token::Word(w) => {
-                let val = w.value.to_ascii_uppercase();
-                if val == "CATALOGS" {
-                    self.parser.advance_token();
-                    return Ok(ExtendedStatement::ShowCatalogsStatement);
-                }
+        if let Token::Word(w) = &token.token {
+            let val = w.value.to_ascii_uppercase();
+            if val == "CATALOGS" {
+                self.parser.advance_token();
+                return Ok(ExtendedStatement::ShowCatalogsStatement);
             }
-            _ => {}
         };
         Ok(ExtendedStatement::SQLStatement(Box::from(
             self.parser.parse_show()?,

@@ -4,6 +4,7 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::DataFusionError;
+use datafusion::common::Result;
 use datafusion::datasource::TableType;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
@@ -14,7 +15,6 @@ use iceberg::inspect::MetadataTableType;
 use iceberg::table::Table;
 use std::any::Any;
 use std::sync::Arc;
-use datafusion::common::Result;
 
 #[derive(Debug, Clone)]
 pub(crate) struct IcebergMetadataTableProvider {
@@ -28,7 +28,7 @@ impl IcebergMetadataTableProvider {
         metadata_table_name: &str,
     ) -> Result<IcebergMetadataTableProvider> {
         let metadata_table_type = MetadataTableType::try_from(metadata_table_name)
-            .map_err(|e| DataFusionError::NotImplemented(e))?;
+            .map_err(DataFusionError::NotImplemented)?;
         Ok(IcebergMetadataTableProvider {
             table,
             r#type: metadata_table_type,
@@ -67,9 +67,7 @@ impl TableProvider for IcebergMetadataTableProvider {
 }
 
 impl IcebergMetadataTableProvider {
-    pub async fn scan(
-        self,
-    ) -> Result<BoxStream<'static, Result<RecordBatch>>> {
+    pub async fn scan(self) -> Result<BoxStream<'static, Result<RecordBatch>>> {
         let metadata_table = self.table.inspect();
         let stream = match self.r#type {
             MetadataTableType::Snapshots => metadata_table.snapshots().scan().await,
