@@ -84,19 +84,18 @@ impl TableProviderBuilder {
                 )
                 .await
             }
-            TableFormat::Hive => {
-                if self.hive_storage_info.is_none() || self.hive_partitions.is_none() {
-                    Err(DataFusionError::Internal(
-                        "hive_storage_info or hive_partitions not existed".into(),
-                    ))
-                } else {
+            TableFormat::Hive => match (self.hive_storage_info, self.hive_partitions) {
+                (Some(storage_info), Some(partitions)) => {
                     HiveTableProviderFactory::try_create_table_provider(
-                        self.hive_storage_info.unwrap(),
-                        self.hive_partitions.unwrap(),
+                        storage_info,
+                        partitions,
                         self.storage_credential,
                     )
                 }
-            }
+                _ => Err(DataFusionError::Internal(
+                    "hive_storage_info or hive_partitions not existed".into(),
+                )),
+            },
         }
     }
 
@@ -104,10 +103,10 @@ impl TableProviderBuilder {
         if self.table_properties.contains_key("metadata_location") {
             return Ok(TableFormat::Iceberg);
         }
-        if let Some(spark_provider) = self.table_properties.get("spark.sql.sources.provider") {
-            if spark_provider == "DELTA" {
-                return Ok(TableFormat::Delta);
-            }
+        if let Some(spark_provider) = self.table_properties.get("spark.sql.sources.provider")
+            && spark_provider == "DELTA"
+        {
+            return Ok(TableFormat::Delta);
         }
 
         // other table format fallback to hive format

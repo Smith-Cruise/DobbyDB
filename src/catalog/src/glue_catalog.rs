@@ -42,8 +42,7 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
         aws_config = aws_config.region(Region::new(region.clone()));
     }
     let aws_config = aws_config.load().await;
-    let glue_client = Client::new(&aws_config);
-    glue_client
+    Client::new(&aws_config)
 }
 
 #[derive(Debug)]

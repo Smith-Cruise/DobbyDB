@@ -55,10 +55,7 @@ impl InternalCatalog {
     }
 
     fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
-        Ok(StreamingTable::try_new(
-            Arc::clone(&table.schema()),
-            vec![table],
-        )?)
+        StreamingTable::try_new(table.schema().clone(), vec![table])
     }
 }
 

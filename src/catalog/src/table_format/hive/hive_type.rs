@@ -57,21 +57,17 @@ fn parse_decimal_type(hive_type: &str) -> Result<DataType> {
     if let Some(inner) = s
         .strip_prefix("decimal(")
         .or_else(|| s.strip_prefix("DECIMAL("))
+        && let Some(inner) = inner.strip_suffix(')')
     {
-        if let Some(inner) = inner.strip_suffix(')') {
-            let parts: Vec<&str> = inner.split(',').collect();
-            if parts.len() == 2 {
-                let precision = parts[0].trim().parse::<u8>().map_err(|_| {
-                    DataFusionError::Internal(format!(
-                        "invalid decimal precision in: {}",
-                        hive_type
-                    ))
-                })?;
-                let scale = parts[1].trim().parse::<i8>().map_err(|_| {
-                    DataFusionError::Internal(format!("invalid decimal scale in: {}", hive_type))
-                })?;
-                return Ok(DataType::Decimal128(precision, scale));
-            }
+        let parts: Vec<&str> = inner.split(',').collect();
+        if parts.len() == 2 {
+            let precision = parts[0].trim().parse::<u8>().map_err(|_| {
+                DataFusionError::Internal(format!("invalid decimal precision in: {}", hive_type))
+            })?;
+            let scale = parts[1].trim().parse::<i8>().map_err(|_| {
+                DataFusionError::Internal(format!("invalid decimal scale in: {}", hive_type))
+            })?;
+            return Ok(DataType::Decimal128(precision, scale));
         }
     }
     Ok(DataType::Decimal128(38, 10))

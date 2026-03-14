@@ -247,9 +247,9 @@ impl TableProvider for HiveTableProvider {
                 store_url,
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
-                &filter_data_filters(filters, &self.hive_storage_info.table_schema.file_schema()),
+                &filter_data_filters(filters, self.hive_storage_info.table_schema.file_schema()),
                 state,
-                &self.hive_storage_info.table_schema.file_schema(),
+                self.hive_storage_info.table_schema.file_schema(),
                 projection,
                 limit,
             ),
@@ -587,7 +587,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
             let arr = Date32Array::from(
                 values
                     .iter()
-                    .map(|v| v.and_then(|s| parse_date_to_days(s)))
+                    .map(|v| v.and_then(parse_date_to_days))
                     .collect::<Vec<_>>(),
             );
             Ok(Arc::new(arr) as ArrayRef)
@@ -596,7 +596,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
             let arr = TimestampMicrosecondArray::from(
                 values
                     .iter()
-                    .map(|v| v.and_then(|s| parse_timestamp_micros(s)))
+                    .map(|v| v.and_then(parse_timestamp_micros))
                     .collect::<Vec<_>>(),
             );
             Ok(Arc::new(arr) as ArrayRef)
@@ -622,7 +622,7 @@ fn parse_date_to_days(s: &str) -> Option<i32> {
 
 /// Compute days since 1970-01-01 using the proleptic Gregorian calendar.
 fn days_since_epoch(year: i32, month: u32, day: u32) -> Option<i32> {
-    if month < 1 || month > 12 || day < 1 || day > 31 {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
     let days_in_months = [0u32, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

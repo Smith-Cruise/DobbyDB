@@ -28,7 +28,7 @@ impl IcebergMetadataTableProvider {
         metadata_table_name: &str,
     ) -> Result<IcebergMetadataTableProvider> {
         let metadata_table_type = MetadataTableType::try_from(metadata_table_name)
-            .map_err(|e| DataFusionError::NotImplemented(e))?;
+            .map_err(DataFusionError::NotImplemented)?;
         Ok(IcebergMetadataTableProvider {
             table,
             r#type: metadata_table_type,

@@ -203,7 +203,7 @@ impl SchemaProvider for HMSSchema {
                     .map_err(|e| DataFusionError::External(e.into()))??;
                 partitions
                     .iter()
-                    .map(|p| HivePartition::try_new_from_hms_partition(p))
+                    .map(HivePartition::try_new_from_hms_partition)
                     .collect::<Result<Vec<_>, _>>()?
             } else {
                 vec![]

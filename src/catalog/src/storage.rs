@@ -176,7 +176,7 @@ impl OSSCredential {
 }
 
 pub fn parse_location_schema_host(path: &str) -> Result<(String, String)> {
-    let parsed_url = Url::parse(&path).map_err(|e| DataFusionError::External(e.into()))?;
+    let parsed_url = Url::parse(path).map_err(|e| DataFusionError::External(e.into()))?;
     let url_schema = parsed_url.scheme();
     let host = if let Some(host) = parsed_url.host_str() {
         host
