@@ -7,13 +7,13 @@ use datafusion::common::TableReference;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
-use datafusion::logical_expr::sqlparser::ast::{Statement, Use};
 use datafusion::logical_expr::LogicalPlanBuilder;
+use datafusion::logical_expr::sqlparser::ast::{Statement, Use};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::get_catalog_manager;
 use dobbydb_catalog::internal_catalog::{
-    InternalCatalog, INFORMATION_SCHEMA_SHOW_CATALOGS,
-    INFORMATION_SCHEMA_SHOW_SCHEMAS, INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG,
+    INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
+    INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG, InternalCatalog,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};

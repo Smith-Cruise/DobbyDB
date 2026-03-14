@@ -1,6 +1,6 @@
-mod hive_table_provider;
-pub mod hive_storage_info;
 pub mod hive_partition;
+pub mod hive_storage_info;
+mod hive_table_provider;
 mod hive_type;
 
 use crate::storage::StorageCredential;

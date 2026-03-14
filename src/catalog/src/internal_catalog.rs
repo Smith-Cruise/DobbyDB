@@ -1,4 +1,4 @@
-use crate::catalog::{get_catalog_manager, CatalogConfig};
+use crate::catalog::{CatalogConfig, get_catalog_manager};
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;

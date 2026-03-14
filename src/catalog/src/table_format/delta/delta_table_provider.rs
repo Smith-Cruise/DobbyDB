@@ -8,13 +8,13 @@ use datafusion::error::DataFusionError;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use deltalake::delta_datafusion::DeltaScanNext;
-use deltalake::logstore::{LogStore, LogStoreRef};
 use deltalake::DeltaTableBuilder;
+use deltalake::delta_datafusion::DeltaScanNext;
+use deltalake::delta_datafusion::engine::AsObjectStoreUrl;
+use deltalake::logstore::{LogStore, LogStoreRef};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
-use deltalake::delta_datafusion::engine::AsObjectStoreUrl;
 use url::Url;
 
 #[derive(Debug)]

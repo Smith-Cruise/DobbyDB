@@ -1,11 +1,11 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
+use crate::table_format::TableFormat;
 use crate::table_format::delta::DeltaTableProviderFactory;
+use crate::table_format::hive::HiveTableProviderFactory;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
-use crate::table_format::hive::HiveTableProviderFactory;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
-use crate::table_format::TableFormat;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;

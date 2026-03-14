@@ -1,11 +1,11 @@
-use crate::storage::{parse_location_schema_host, StorageCredential};
+use crate::storage::{StorageCredential, parse_location_schema_host};
+use crate::table_format::hive::HiveStorageInfo;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
-use crate::table_format::hive::HiveStorageInfo;
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int64Array, Int8Array, StringArray, TimestampMicrosecondArray,
+    ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array, Int16Array,
+    Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
 };
 use datafusion::arrow::datatypes::{DataType, SchemaRef, TimeUnit};
 use datafusion::catalog::memory::DataSourceExec;
@@ -14,13 +14,13 @@ use datafusion::common::config::CsvOptions;
 use datafusion::common::parsers::CompressionTypeVariant;
 use datafusion::common::{Result, ToDFSchema};
 use datafusion::config::TableParquetOptions;
+use datafusion::datasource::TableType;
 use datafusion::datasource::file_format::file_compression_type::FileCompressionType;
 use datafusion::datasource::listing::PartitionedFile;
 use datafusion::datasource::physical_plan::{
     CsvSource, FileGroup, FileScanConfigBuilder, ParquetSource,
 };
 use datafusion::datasource::table_schema::TableSchema;
-use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::utils::conjunction;
@@ -146,11 +146,8 @@ impl TableProvider for HiveTableProvider {
         let object_store = state.runtime_env().object_store(&store_url)?;
 
         let scan_file_list: Vec<PartitionedFile> = if self.partitions.is_empty() {
-            let file_object_metas = list_files(
-                &object_store,
-                &self.hive_storage_info.table_location,
-            )
-            .await?;
+            let file_object_metas =
+                list_files(&object_store, &self.hive_storage_info.table_location).await?;
             file_object_metas
                 .iter()
                 .map(|file_object_meta| PartitionedFile::from(file_object_meta.clone()))
@@ -158,11 +155,7 @@ impl TableProvider for HiveTableProvider {
         } else {
             let mut result: Vec<PartitionedFile> = Vec::new();
             for partition in &self.partitions {
-                let file_object_metas = list_files(
-                    &object_store,
-                    &partition.location,
-                )
-                .await?;
+                let file_object_metas = list_files(&object_store, &partition.location).await?;
                 let partition_values: Vec<ScalarValue> = self
                     .hive_storage_info
                     .table_schema
@@ -790,9 +783,10 @@ mod tests {
 
     #[test]
     fn test_location_to_object_store_path() {
-        let path =
-            location_to_object_store_path("s3://warehouse/hive/tpch_hive.db/textfile_no_partition_table")
-                .unwrap();
+        let path = location_to_object_store_path(
+            "s3://warehouse/hive/tpch_hive.db/textfile_no_partition_table",
+        )
+        .unwrap();
         assert_eq!(
             path.as_ref(),
             "hive/tpch_hive.db/textfile_no_partition_table"

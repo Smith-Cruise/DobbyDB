@@ -1,6 +1,9 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
-use crate::table_format::table_provider_factory::{split_table_name, TableProviderBuilder};
+use crate::table_format::TableFormat;
+use crate::table_format::hive::hive_partition::HivePartition;
+use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
+use crate::table_format::table_provider_factory::{TableProviderBuilder, split_table_name};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
@@ -17,9 +20,6 @@ use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::sync::Arc;
 use volo_thrift::MaybeException;
-use crate::table_format::hive::hive_partition::HivePartition;
-use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
-use crate::table_format::TableFormat;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HMSCatalogConfig {
@@ -187,7 +187,11 @@ impl SchemaProvider for HMSSchema {
             // if it's hive format, provide more
             let hive_storage_info = HiveStorageInfo::try_new_from_hms_table(&hms_table)?;
 
-            let hive_partitions = if !hive_storage_info.table_schema.table_partition_cols().is_empty() {
+            let hive_partitions = if !hive_storage_info
+                .table_schema
+                .table_partition_cols()
+                .is_empty()
+            {
                 let partitions = hms_client
                     .get_partitions(
                         self.schema_name.clone().into(),
@@ -197,12 +201,16 @@ impl SchemaProvider for HMSSchema {
                     .await
                     .map(from_thrift_exception)
                     .map_err(|e| DataFusionError::External(e.into()))??;
-                partitions.iter().map(|p| HivePartition::try_new_from_hms_partition(p)).collect::<Result<Vec<_>, _>>()?
+                partitions
+                    .iter()
+                    .map(|p| HivePartition::try_new_from_hms_partition(p))
+                    .collect::<Result<Vec<_>, _>>()?
             } else {
                 vec![]
             };
 
-            table_provider_builder = table_provider_builder.with_hive_storage_info(hive_storage_info);
+            table_provider_builder =
+                table_provider_builder.with_hive_storage_info(hive_storage_info);
             table_provider_builder = table_provider_builder.with_hive_partitions(hive_partitions);
         }
 

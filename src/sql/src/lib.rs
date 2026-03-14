@@ -1,3 +1,3 @@
 pub mod parser;
-pub mod statements;
 pub mod session;
+pub mod statements;

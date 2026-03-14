@@ -11,11 +11,11 @@ use iceberg::{NamespaceIdent, TableIdent};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod expr_to_predicate;
 mod metadata_scan;
 pub mod metadata_table_provider;
 mod table_provider;
 mod table_scan;
-mod expr_to_predicate;
 
 pub struct IcebergTableProviderFactory {}
 

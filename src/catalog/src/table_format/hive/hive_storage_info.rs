@@ -64,10 +64,7 @@ impl HiveStorageInfo {
         Ok(Self {
             table_location,
             input_format,
-            table_schema: TableSchema::new(
-                Arc::new(Schema::new(data_cols)),
-                table_partition_cols,
-            ),
+            table_schema: TableSchema::new(Arc::new(Schema::new(data_cols)), table_partition_cols),
             serde_properties,
         })
     }
@@ -93,25 +90,39 @@ impl HiveStorageInfo {
         } else {
             return Ok(Vec::new());
         };
-        let fields: Result<Vec<(String, String)>> = field_schemas.iter().map(|field_schema| {
-            let name: String = match field_schema.name.as_ref() {
-                Some(s) => s.to_string(),
-                None => {
-                    return Err(DataFusionError::Internal("FieldSchema's name not existed".to_string()))
-                }
-            };
-            let ty: String = match field_schema.r#type.as_ref() {
-                Some(s) => s.to_string(),
-                None => {
-                    return Err(DataFusionError::Internal("FieldSchema's type not existed".to_string()))
-                }
-            };
-            Ok((name, ty))
-        }).collect();
+        let fields: Result<Vec<(String, String)>> = field_schemas
+            .iter()
+            .map(|field_schema| {
+                let name: String = match field_schema.name.as_ref() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Err(DataFusionError::Internal(
+                            "FieldSchema's name not existed".to_string(),
+                        ));
+                    }
+                };
+                let ty: String = match field_schema.r#type.as_ref() {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Err(DataFusionError::Internal(
+                            "FieldSchema's type not existed".to_string(),
+                        ));
+                    }
+                };
+                Ok((name, ty))
+            })
+            .collect();
 
-        let fields: Result<Vec<Arc<Field>>> = fields?.iter().map(|(name, ty)| {
-           Ok(Arc::new(Field::new(name, hive_type_to_arrow_type(ty)?, true)))
-        }).collect();
+        let fields: Result<Vec<Arc<Field>>> = fields?
+            .iter()
+            .map(|(name, ty)| {
+                Ok(Arc::new(Field::new(
+                    name,
+                    hive_type_to_arrow_type(ty)?,
+                    true,
+                )))
+            })
+            .collect();
         fields
     }
 }

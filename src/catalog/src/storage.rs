@@ -1,8 +1,8 @@
 use datafusion::catalog::Session;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
-use datafusion::object_store::aws::AmazonS3Builder;
 use datafusion::object_store::ObjectStore;
+use datafusion::object_store::aws::AmazonS3Builder;
 use deltalake_aws::constants::{
     AWS_ACCESS_KEY_ID, AWS_ENDPOINT_URL, AWS_REGION, AWS_SECRET_ACCESS_KEY,
 };

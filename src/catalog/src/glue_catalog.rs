@@ -1,10 +1,10 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
-use crate::table_format::table_provider_factory::{split_table_name, TableProviderBuilder};
+use crate::table_format::table_provider_factory::{TableProviderBuilder, split_table_name};
 use async_trait::async_trait;
 use aws_config::Region;
-use aws_sdk_glue::config::Credentials;
 use aws_sdk_glue::Client;
+use aws_sdk_glue::config::Credentials;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
