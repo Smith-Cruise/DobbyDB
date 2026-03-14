@@ -517,6 +517,7 @@ fn build_parquet_exec(
 //     Ok(surviving)
 // }
 
+#[allow(unused)]
 fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Result<ArrayRef> {
     match data_type {
         DataType::Int8 => {

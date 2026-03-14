@@ -26,7 +26,7 @@ pub enum CatalogConfig {
 static CATALOG_MANAGER: OnceLock<RwLock<CatalogManager>> = OnceLock::new();
 
 pub fn get_catalog_manager() -> &'static RwLock<CatalogManager> {
-    CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::new()))
+    CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::default()))
 }
 
 #[derive(Debug)]
@@ -34,13 +34,15 @@ pub struct CatalogManager {
     catalogs: HashMap<String, CatalogConfig>,
 }
 
-impl CatalogManager {
-    pub fn new() -> CatalogManager {
-        CatalogManager {
-            catalogs: HashMap::new(),
+impl Default for CatalogManager {
+    fn default() -> Self {
+        Self {
+            catalogs: HashMap::default(),
         }
     }
+}
 
+impl CatalogManager {
     fn register_catalog(
         &mut self,
         catalog_name: &str,
@@ -64,29 +66,21 @@ impl CatalogManager {
             DataFusionError::Configuration(format!("Failed to parse config: {}", e))
         })?;
 
-        match &configs.hms {
-            Some(catalogs) => {
-                for hms_catalog in catalogs {
-                    self.register_catalog(
-                        &hms_catalog.name,
-                        CatalogConfig::HMS(hms_catalog.clone()),
-                    )?;
-                }
+        if let Some(catalogs) = configs.hms {
+            for hms_catalog in catalogs {
+                self.register_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
             }
-            _ => {}
         }
 
-        match &configs.glue {
-            Some(catalogs) => {
-                for glue_catalog in catalogs {
-                    self.register_catalog(
-                        &glue_catalog.name,
-                        CatalogConfig::GLUE(glue_catalog.clone()),
-                    )?;
-                }
+        if let Some(catalogs) = configs.glue {
+            for glue_catalog in catalogs {
+                self.register_catalog(
+                    &glue_catalog.name,
+                    CatalogConfig::GLUE(glue_catalog.clone()),
+                )?;
             }
-            None => {}
         }
+
         register_something();
         Ok(())
     }
