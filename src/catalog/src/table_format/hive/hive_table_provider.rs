@@ -1,10 +1,10 @@
-use crate::storage::StorageCredential;
+use crate::storage::{parse_location_schema_host, StorageCredential};
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
 use crate::table_format::hive::HiveStorageInfo;
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
+    ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array,
     Int64Array, Int8Array, StringArray, TimestampMicrosecondArray,
 };
 use datafusion::arrow::datatypes::{DataType, SchemaRef, TimeUnit};
@@ -33,6 +33,7 @@ use futures::StreamExt;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use url::Url;
 
 #[derive(Debug)]
 pub struct HiveTableProvider {
@@ -138,14 +139,15 @@ impl TableProvider for HiveTableProvider {
             cred.register_into_session(&self.hive_storage_info.table_location, state)?;
         }
 
-        let store_url = ObjectStoreUrl::parse(&self.hive_storage_info.table_location)?;
+        let (path_schema, path_host) =
+            parse_location_schema_host(&self.hive_storage_info.table_location)?;
+        let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?;
 
         let object_store = state.runtime_env().object_store(&store_url)?;
 
         let scan_file_list: Vec<PartitionedFile> = if self.partitions.is_empty() {
             let file_object_metas = list_files(
                 &object_store,
-                &self.hive_storage_info.table_location,
                 &self.hive_storage_info.table_location,
             )
             .await?;
@@ -158,7 +160,6 @@ impl TableProvider for HiveTableProvider {
             for partition in &self.partitions {
                 let file_object_metas = list_files(
                     &object_store,
-                    &self.hive_storage_info.table_location,
                     &partition.location,
                 )
                 .await?;
@@ -750,13 +751,9 @@ fn parse_partition_value(s: &str, data_type: &DataType) -> Result<ScalarValue> {
 
 async fn list_files(
     object_store: &Arc<dyn ObjectStore>,
-    table_location: &str,
-    full_location: &str,
+    directory_full_location: &str,
 ) -> Result<Vec<ObjectMeta>> {
-    let relative_path = full_location
-        .strip_prefix(table_location)
-        .ok_or_else(|| DataFusionError::Internal(String::from("extract path failed")))?;
-    let relative_path = Path::from(relative_path);
+    let relative_path = location_to_object_store_path(directory_full_location)?;
 
     let file_object_metas: Vec<_> = object_store
         .list(Some(&relative_path))
@@ -768,10 +765,49 @@ async fn list_files(
         let meta = file_object_meta.map_err(|e| DataFusionError::External(Box::new(e)))?;
         let file_name = meta.location.filename().unwrap_or("");
 
+        // ignore empty object
+        if meta.size == 0 {
+            continue;
+        }
+
+        // ignore hidden file
         if file_name.starts_with('_') || file_name.starts_with('.') {
             continue;
         }
         results.push(meta);
     }
     Ok(results)
+}
+
+fn location_to_object_store_path(location: &str) -> Result<Path> {
+    let parsed = Url::parse(location).map_err(|e| DataFusionError::External(e.into()))?;
+    Ok(Path::from(parsed.path().trim_start_matches('/')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_location_to_object_store_path() {
+        let path =
+            location_to_object_store_path("s3://warehouse/hive/tpch_hive.db/textfile_no_partition_table")
+                .unwrap();
+        assert_eq!(
+            path.as_ref(),
+            "hive/tpch_hive.db/textfile_no_partition_table"
+        );
+    }
+
+    #[test]
+    fn test_location_to_object_store_path_with_partition() {
+        let path = location_to_object_store_path(
+            "s3://warehouse/hive/tpch_hive.db/textfile_partition_table/p=1",
+        )
+        .unwrap();
+        assert_eq!(
+            path.as_ref(),
+            "hive/tpch_hive.db/textfile_partition_table/p=1"
+        );
+    }
 }

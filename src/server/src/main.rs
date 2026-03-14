@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
     server.init().await?;
 
     let print_options = PrintOptions {
-        format: PrintFormat::Tsv,
+        format: PrintFormat::Table,
         quiet: false,
         maxrows: MaxRows::Unlimited,
         color: true,
