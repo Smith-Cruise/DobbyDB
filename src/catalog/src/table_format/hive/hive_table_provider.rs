@@ -345,7 +345,9 @@ fn prune_partitions(
     state: &dyn Session,
 ) -> Result<Vec<usize>> {
     if partition_fields.is_empty() {
-        return Err(DataFusionError::Internal("partition fields is empty".to_string()));
+        return Err(DataFusionError::Internal(
+            "partition fields is empty".to_string(),
+        ));
     }
     if filters.is_empty() {
         return Ok((0..partitions.len()).collect());
@@ -402,7 +404,9 @@ fn prune_partitions(
 
     let mut filter_result: Option<BooleanArray> = None;
     for filter in compiled_filters {
-        let result_array = filter.evaluate(&batch)?.to_array_of_size(batch.num_rows())?;
+        let result_array = filter
+            .evaluate(&batch)?
+            .to_array_of_size(batch.num_rows())?;
         let bool_array = result_array
             .as_any()
             .downcast_ref::<BooleanArray>()
@@ -433,10 +437,15 @@ fn prune_partitions(
 
 #[allow(unused)]
 fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Result<ArrayRef> {
+    let normalized_values: Vec<Option<&str>> = values
+        .iter()
+        .map(|value| normalize_partition_value(*value))
+        .collect();
+
     match data_type {
         DataType::Int8 => {
             let arr = Int8Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<i8>().ok()))
                     .collect::<Vec<_>>(),
@@ -445,7 +454,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Int16 => {
             let arr = Int16Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<i16>().ok()))
                     .collect::<Vec<_>>(),
@@ -454,7 +463,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Int32 => {
             let arr = Int32Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<i32>().ok()))
                     .collect::<Vec<_>>(),
@@ -463,7 +472,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Int64 => {
             let arr = Int64Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<i64>().ok()))
                     .collect::<Vec<_>>(),
@@ -472,7 +481,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Float32 => {
             let arr = Float32Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<f32>().ok()))
                     .collect::<Vec<_>>(),
@@ -481,7 +490,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Float64 => {
             let arr = Float64Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<f64>().ok()))
                     .collect::<Vec<_>>(),
@@ -490,7 +499,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Boolean => {
             let arr = BooleanArray::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(|s| s.parse::<bool>().ok()))
                     .collect::<Vec<_>>(),
@@ -499,7 +508,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Date32 => {
             let arr = Date32Array::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(parse_date_to_days))
                     .collect::<Vec<_>>(),
@@ -508,7 +517,7 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
         }
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
             let arr = TimestampMicrosecondArray::from(
-                values
+                normalized_values
                     .iter()
                     .map(|v| v.and_then(parse_timestamp_micros))
                     .collect::<Vec<_>>(),
@@ -516,9 +525,16 @@ fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Resul
             Ok(Arc::new(arr) as ArrayRef)
         }
         _ => {
-            let arr = StringArray::from(values.to_vec());
+            let arr = StringArray::from(normalized_values);
             Ok(Arc::new(arr) as ArrayRef)
         }
+    }
+}
+
+fn normalize_partition_value(value: Option<&str>) -> Option<&str> {
+    match value {
+        Some("__HIVE_DEFAULT_PARTITION__") | Some("") => None,
+        _ => value,
     }
 }
 
@@ -697,7 +713,7 @@ mod tests {
     use super::*;
     use datafusion::arrow::datatypes::Field;
     use datafusion::logical_expr::expr::InList;
-    use datafusion::logical_expr::{Operator, binary_expr, col, lit};
+    use datafusion::logical_expr::{Expr, Operator, binary_expr, col, lit};
     use datafusion::prelude::SessionContext;
 
     #[test]
@@ -723,9 +739,8 @@ mod tests {
             "hive/tpch_hive.db/textfile_partition_table/p=1"
         );
     }
-
-    #[tokio::test]
-    async fn test_prune_partitions_eq() {
+    #[test]
+    fn test_prune_partitions_eq() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
         let partitions = sample_partitions();
@@ -738,11 +753,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(surviving, vec![1]);
+        assert_eq!(surviving, vec![1, 5]);
     }
 
-    #[tokio::test]
-    async fn test_prune_partitions_in_list_and_gt() {
+    #[test]
+    fn test_prune_partitions_in_list_and_gt() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
         let partitions = sample_partitions();
@@ -765,8 +780,28 @@ mod tests {
         assert_eq!(surviving, vec![2]);
     }
 
-    #[tokio::test]
-    async fn test_prune_partitions_ignores_mixed_data_filters() {
+    #[test]
+    fn test_prune_partitions_eq_on_multiple_partition_columns() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[
+                binary_expr(col("dt"), Operator::Eq, lit("2012-01-03")),
+                binary_expr(col("bucket"), Operator::Eq, lit(2_i32)),
+            ],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![1]);
+    }
+
+    #[test]
+    fn test_prune_partitions_ignores_mixed_data_filters() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
         let partitions = sample_partitions();
@@ -782,11 +817,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(surviving, vec![1]);
+        assert_eq!(surviving, vec![1, 5]);
     }
 
-    #[tokio::test]
-    async fn test_prune_partitions_without_partition_filter_keeps_all() {
+    #[test]
+    fn test_prune_partitions_without_partition_filter_keeps_all() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
         let partitions = sample_partitions();
@@ -799,30 +834,14 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(surviving, vec![0, 1, 2]);
+        assert_eq!(surviving, vec![0, 1, 2, 3, 4, 5]);
     }
 
-    #[tokio::test]
-    async fn test_prune_partitions_null_partition_does_not_match() {
+    #[test]
+    fn test_prune_partitions_null_partition_does_not_match() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
-        let partitions = vec![
-            HivePartition {
-                location:
-                    "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=__HIVE_DEFAULT_PARTITION__"
-                        .to_string(),
-                partition_values: vec!["__HIVE_DEFAULT_PARTITION__".to_string()],
-            },
-            HivePartition {
-                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=".to_string(),
-                partition_values: vec!["".to_string()],
-            },
-            HivePartition {
-                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03"
-                    .to_string(),
-                partition_values: vec!["2012-01-03".to_string()],
-            },
-        ];
+        let partitions = sample_partitions();
 
         let surviving = prune_partitions(
             &partitions,
@@ -832,29 +851,146 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(surviving, vec![2]);
+        assert_eq!(surviving, vec![1, 5]);
+    }
+    #[test]
+    fn test_prune_partitions_is_null_matches_null_partitions() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[Expr::IsNull(Box::new(col("dt")))],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![3, 4]);
+    }
+
+    #[test]
+    fn test_prune_partitions_bucket_is_not_null_matches_non_null_partitions() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[Expr::IsNotNull(Box::new(col("bucket")))],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_prune_partitions_dt_eq_and_bucket_is_null_matches_null_bucket_partition() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[
+                binary_expr(col("dt"), Operator::Eq, lit("2012-01-03")),
+                Expr::IsNull(Box::new(col("bucket"))),
+            ],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![5]);
+    }
+
+    #[test]
+
+    fn test_prune_partitions_dt_is_null_and_bucket_eq_matches_intersection() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[
+                Expr::IsNull(Box::new(col("dt"))),
+                binary_expr(col("bucket"), Operator::Eq, lit(2_i32)),
+            ],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![3]);
+    }
+
+    #[test]
+    fn test_prune_partitions_is_null_and_eq_matches_nothing() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[
+                Expr::IsNull(Box::new(col("dt"))),
+                binary_expr(col("dt"), Operator::Eq, lit("2012-01-03")),
+            ],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, Vec::<usize>::new());
     }
 
     fn partition_fields() -> Vec<Arc<Field>> {
-        vec![Arc::new(Field::new("dt", DataType::Utf8, true))]
+        vec![
+            Arc::new(Field::new("dt", DataType::Utf8, true)),
+            Arc::new(Field::new("bucket", DataType::Int32, true)),
+        ]
     }
 
     fn sample_partitions() -> Vec<HivePartition> {
         vec![
             HivePartition {
-                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-01"
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-01/bucket=1"
                     .to_string(),
-                partition_values: vec!["2012-01-01".to_string()],
+                partition_values: vec!["2012-01-01".to_string(), "1".to_string()],
             },
             HivePartition {
-                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03"
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03/bucket=2"
                     .to_string(),
-                partition_values: vec!["2012-01-03".to_string()],
+                partition_values: vec!["2012-01-03".to_string(), "2".to_string()],
             },
             HivePartition {
-                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-04"
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-04/bucket=3"
                     .to_string(),
-                partition_values: vec!["2012-01-04".to_string()],
+                partition_values: vec!["2012-01-04".to_string(), "3".to_string()],
+            },
+            HivePartition {
+                location:
+                    "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=__HIVE_DEFAULT_PARTITION__/bucket=2"
+                        .to_string(),
+                partition_values: vec!["__HIVE_DEFAULT_PARTITION__".to_string(), "2".to_string()],
+            },
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=/bucket=1"
+                    .to_string(),
+                partition_values: vec!["".to_string(), "1".to_string()],
+            },
+            HivePartition {
+                location:
+                    "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03/bucket=__HIVE_DEFAULT_PARTITION__"
+                    .to_string(),
+                partition_values: vec![
+                    "2012-01-03".to_string(),
+                    "__HIVE_DEFAULT_PARTITION__".to_string(),
+                ],
             },
         ]
     }
