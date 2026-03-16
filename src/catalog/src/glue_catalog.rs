@@ -1,6 +1,8 @@
 use crate::catalog::CatalogConfig;
 use crate::storage::StorageCredential;
-use crate::table_format::table_provider_factory::{TableProviderBuilder, split_table_name};
+use crate::table_format::table_provider_factory::{
+    TableProviderBuilder, deduce_table_format, split_table_name,
+};
 use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_glue::Client;
@@ -164,9 +166,12 @@ impl SchemaProvider for GlueSchema {
             }
         };
 
+        let table_format = deduce_table_format(&glue_table_properties)?;
+
         let table_provider_builder = TableProviderBuilder::new(
             table_reference,
             glue_table_properties,
+            table_format,
             CatalogConfig::GLUE(self.config.deref().clone()),
         );
 
