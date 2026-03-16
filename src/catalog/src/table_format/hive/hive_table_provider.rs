@@ -435,7 +435,6 @@ fn prune_partitions(
     Ok(surviving)
 }
 
-#[allow(unused)]
 fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Result<ArrayRef> {
     let normalized_values: Vec<Option<&str>> = values
         .iter()
