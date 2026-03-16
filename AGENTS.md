@@ -11,6 +11,8 @@ DobbyDB is a datafusion based query engine. It focuses on lakehouse query.
 * Glue
 
 ## Commit Requirements
+Project's code comments, pull request must use English.
+
 Format check:
 ```bash
 cargo fmt --all -- --check
