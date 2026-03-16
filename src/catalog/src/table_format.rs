@@ -3,7 +3,7 @@ pub mod hive;
 pub mod iceberg;
 pub mod table_provider_factory;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum TableFormat {
     Iceberg,
     Delta,

@@ -3,7 +3,9 @@ use crate::storage::StorageCredential;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
-use crate::table_format::table_provider_factory::{TableProviderBuilder, split_table_name};
+use crate::table_format::table_provider_factory::{
+    TableProviderBuilder, deduce_table_format, split_table_name,
+};
 use async_trait::async_trait;
 use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
@@ -175,18 +177,9 @@ impl SchemaProvider for HMSSchema {
             }
         }
 
-        let mut table_provider_builder = TableProviderBuilder::new(
-            table_reference,
-            hms_table_properties,
-            CatalogConfig::HMS(self.config.deref().clone()),
-        );
-        table_provider_builder = table_provider_builder
-            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()));
-
-        if table_provider_builder.deduce_table_format()? == TableFormat::Hive {
-            // if it's hive format, provide more
+        let table_format = deduce_table_format(&hms_table_properties)?;
+        let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
             let hive_storage_info = HiveStorageInfo::try_new_from_hms_table(&hms_table)?;
-
             let hive_partitions = if !hive_storage_info
                 .table_schema
                 .table_partition_cols()
@@ -208,120 +201,23 @@ impl SchemaProvider for HMSSchema {
             } else {
                 vec![]
             };
+            (Some(hive_storage_info), Some(hive_partitions))
+        } else {
+            (None, None)
+        };
 
-            table_provider_builder =
-                table_provider_builder.with_hive_storage_info(hive_storage_info);
-            table_provider_builder = table_provider_builder.with_hive_partitions(hive_partitions);
-        }
-
+        let table_provider_builder = TableProviderBuilder::new(
+            table_reference,
+            hms_table_properties,
+            table_format,
+            CatalogConfig::HMS(self.config.deref().clone()),
+        );
+        let table_provider_builder = table_provider_builder
+            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()));
+        let table_provider_builder =
+            table_provider_builder.with_hive_storage_info(hive_storage_info);
+        let table_provider_builder = table_provider_builder.with_hive_partitions(hive_partitions);
         Ok(Some(table_provider_builder.build().await?))
-
-        // let is_iceberg = hms_table_properties.contains_key("metadata_location");
-        // let is_delta = hms_table_properties
-        //     .get("spark.sql.sources.provider")
-        //     .map(|s| s.as_str())
-        //     == Some("DELTA");
-        //
-        // if !is_iceberg && !is_delta {
-        //     if let Some(sd) = &hms_table.sd {
-        //         if let Some(input_format) = &sd.input_format {
-        //             match HiveTableProviderFactory::detect_input_format(input_format.as_str()) {
-        //                 Ok(fmt) => {
-        //                     let location = sd
-        //                         .location
-        //                         .as_ref()
-        //                         .ok_or_else(|| {
-        //                             DataFusionError::Internal(
-        //                                 "hive table sd is missing location".to_string(),
-        //                             )
-        //                         })?
-        //                         .to_string();
-        //
-        //                     let data_cols: Vec<(String, String)> = sd
-        //                         .cols
-        //                         .as_ref()
-        //                         .map(|cols| {
-        //                             cols.iter()
-        //                                 .filter_map(|f| {
-        //                                     let name = f.name.as_ref()?.to_string();
-        //                                     let ty = f.r#type.as_ref()?.to_string();
-        //                                     Some((name, ty))
-        //                                 })
-        //                                 .collect()
-        //                         })
-        //                         .unwrap_or_default();
-        //
-        //                     let partition_cols: Vec<(String, String)> = hms_table
-        //                         .partition_keys
-        //                         .as_ref()
-        //                         .map(|keys| {
-        //                             keys.iter()
-        //                                 .filter_map(|f| {
-        //                                     let name = f.name.as_ref()?.to_string();
-        //                                     let ty = f.r#type.as_ref()?.to_string();
-        //                                     Some((name, ty))
-        //                                 })
-        //                                 .collect()
-        //                         })
-        //                         .unwrap_or_default();
-        //
-        //                     let serde_properties: HashMap<String, String> = sd
-        //                         .serde_info
-        //                         .as_ref()
-        //                         .and_then(|s| s.parameters.as_ref())
-        //                         .map(|p| {
-        //                             p.iter()
-        //                                 .map(|(k, v)| (k.to_string(), v.to_string()))
-        //                                 .collect()
-        //                         })
-        //                         .unwrap_or_default();
-        //
-        //                     let storage_credential = self.config.storage_credential.clone();
-        //
-        //                     let hive_info = HiveStorageInfo {
-        //                         location,
-        //                         input_format: fmt,
-        //                         data_cols,
-        //                         partition_cols: partition_cols.clone(),
-        //                         serde_properties,
-        //                         storage_credential,
-        //                     };
-        //
-        //                     let hms_partitions = if !partition_cols.is_empty() {
-        //                         hms_client
-        //                             .get_partitions(
-        //                                 self.schema_name.clone().into(),
-        //                                 table_name.to_string().into(),
-        //                                 i16::MAX,
-        //                             )
-        //                             .await
-        //                             .map(from_thrift_exception)
-        //                             .map_err(|e| DataFusionError::External(e.into()))??
-        //                     } else {
-        //                         vec![]
-        //                     };
-        //
-        //                     let table_provider =
-        //                         HiveTableProviderFactory::try_create_table_provider(
-        //                             hive_info,
-        //                             hms_partitions,
-        //                         )
-        //                         .await?;
-        //                     return Ok(Some(table_provider));
-        //                 }
-        //                 Err(e) => return Err(e),
-        //             }
-        //         }
-        //     }
-        // }
-        //
-        // let table_provider = TableProviderFactory::try_new_table_provider(
-        //     &table_reference,
-        //     metadata_table_name,
-        //     &hms_table_properties,
-        //     CatalogConfig::HMS(self.config.deref().clone()),
-        // )
-        // .await?;
     }
 
     fn table_exist(&self, name: &str) -> bool {

@@ -4,10 +4,12 @@ use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array, Int16Array,
+    Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array, Int16Array,
     Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, SchemaRef, TimeUnit};
+use datafusion::arrow::compute;
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::config::CsvOptions;
@@ -56,64 +58,6 @@ impl HiveTableProvider {
     }
 }
 
-// impl HiveTableProvider {
-//     pub fn try_new(info: HiveStorageInfo, hms_partitions: Vec<Partition>) -> Result<Self> {
-//         let partition_col_name_set: HashSet<String> = info
-//             .partition_cols
-//             .iter()
-//             .map(|(name, _)| name.to_ascii_lowercase())
-//             .collect();
-//
-//         let data_fields: Vec<Field> = info
-//             .data_cols
-//             .iter()
-//             .filter(|(name, _)| !partition_col_name_set.contains(&name.to_ascii_lowercase()))
-//             .map(|(name, hive_type)| {
-//                 let dt = hive_type_to_arrow(hive_type)?;
-//                 Ok(Field::new(name, dt, true))
-//             })
-//             .collect::<Result<Vec<_>>>()?;
-//
-//         let partition_fields: Vec<Field> = info
-//             .partition_cols
-//             .iter()
-//             .map(|(name, hive_type)| {
-//                 let dt = hive_type_to_arrow(hive_type)?;
-//                 Ok(Field::new(name, dt, true))
-//             })
-//             .collect::<Result<Vec<_>>>()?;
-//
-//         let data_schema = Arc::new(Schema::new(data_fields));
-//
-//         let mut all_fields = data_schema.fields().to_vec();
-//         all_fields.extend(partition_fields.iter().map(|f| Arc::new(f.clone())));
-//         let full_schema = Arc::new(Schema::new(all_fields));
-//
-//         let partition_col_fields: Vec<FieldRef> =
-//             partition_fields.iter().map(|f| Arc::new(f.clone())).collect();
-//
-//         let partitions = hms_partitions
-//             .into_iter()
-//             .filter_map(|p| {
-//                 let location = p.sd?.location?.to_string();
-//                 let values = p.values?.iter().map(|v| v.to_string()).collect();
-//                 Some(HivePartitionInfo { location, values })
-//             })
-//             .collect();
-//
-//         Ok(Self {
-//             schema: full_schema,
-//             data_schema,
-//             input_format: info.input_format,
-//             location: info.location,
-//             partitions,
-//             partition_col_fields,
-//             serde_properties: info.serde_properties,
-//             storage_credential: info.storage_credential,
-//         })
-//     }
-// }
-
 #[async_trait]
 impl TableProvider for HiveTableProvider {
     fn as_any(&self) -> &dyn Any {
@@ -153,17 +97,20 @@ impl TableProvider for HiveTableProvider {
                 .map(|file_object_meta| PartitionedFile::from(file_object_meta.clone()))
                 .collect()
         } else {
+            let surviving_partition_indices = prune_partitions(
+                &self.partitions,
+                self.hive_storage_info.table_schema.table_partition_cols(),
+                filters,
+                state,
+            )?;
             let mut result: Vec<PartitionedFile> = Vec::new();
-            for partition in &self.partitions {
+            for partition_idx in surviving_partition_indices {
+                let partition = &self.partitions[partition_idx];
                 let file_object_metas = list_files(&object_store, &partition.location).await?;
-                let partition_values: Vec<ScalarValue> = self
-                    .hive_storage_info
-                    .table_schema
-                    .table_partition_cols()
-                    .iter()
-                    .zip(partition.partition_values.iter())
-                    .map(|(field, val)| parse_partition_value(val, field.data_type()))
-                    .collect::<Result<Vec<_>>>()?;
+                let partition_values = build_partition_values(
+                    self.hive_storage_info.table_schema.table_partition_cols(),
+                    partition,
+                )?;
                 result.extend(file_object_metas.iter().map(|file_object_meta| {
                     let mut partition_field = PartitionedFile::from(file_object_meta.clone());
                     partition_field.partition_values = partition_values.clone();
@@ -172,65 +119,6 @@ impl TableProvider for HiveTableProvider {
             }
             result
         };
-
-        // let surviving_partition_indices = if self.partitions.is_empty() {
-        //     vec![]
-        // } else {
-        //     prune_partitions(
-        //         &self.partitions,
-        //         &self.partition_col_fields,
-        //         filters,
-        //         state,
-        //     )?
-        // };
-        //
-        // let (path_schema, path_host) = parse_location_schema_host(&self.location)?;
-        // let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?;
-        // let object_store = state.runtime_env().object_store(&store_url)?;
-        //
-        // let mut all_files: Vec<PartitionedFile> = Vec::new();
-
-        // if self.partitions.is_empty() {
-        //     let files = list_files(
-        //         &object_store,
-        //         &self.location,
-        //         &path_schema,
-        //         &path_host,
-        //     )
-        //     .await?;
-        //     all_files.extend(files.into_iter().map(|(path, size)| {
-        //         PartitionedFile::new(path, size)
-        //     }));
-        // } else {
-        //     for idx in surviving_partition_indices {
-        //         let partition = &self.partitions[idx];
-        //         let files = list_files(
-        //             &object_store,
-        //             &partition.location,
-        //             &path_schema,
-        //             &path_host,
-        //         )
-        //         .await?;
-        //
-        //         let partition_values: Vec<datafusion::scalar::ScalarValue> = self
-        //             .partition_col_fields
-        //             .iter()
-        //             .zip(partition.values.iter())
-        //             .map(|(field, val)| parse_partition_value(val, field.data_type()))
-        //             .collect::<Result<Vec<_>>>()?;
-        //
-        //         for (path, size) in files {
-        //             let mut pf = PartitionedFile::new(path, size);
-        //             pf.partition_values = partition_values.clone();
-        //             all_files.push(pf);
-        //         }
-        //     }
-        // }
-        //
-        // let table_schema = TableSchema::new(
-        //     self.data_schema.clone(),
-        //     self.partition_col_fields.clone(),
-        // );
 
         let file_group = FileGroup::new(scan_file_list);
 
@@ -301,6 +189,17 @@ fn build_csv_exec(
     }
     let config = builder.build();
     Ok(DataSourceExec::from_data_source(config))
+}
+
+fn build_partition_values(
+    partition_fields: &[Arc<datafusion::arrow::datatypes::Field>],
+    partition: &HivePartition,
+) -> Result<Vec<ScalarValue>> {
+    partition_fields
+        .iter()
+        .zip(partition.partition_values.iter())
+        .map(|(field, val)| parse_partition_value(val, field.data_type()))
+        .collect()
 }
 
 fn filter_data_filters(filters: &[Expr], data_schema: &SchemaRef) -> Vec<Expr> {
@@ -439,83 +338,98 @@ fn build_parquet_exec(
     Ok(DataSourceExec::from_data_source(config))
 }
 
-// fn prune_partitions(
-//     partitions: &[HivePartitionInfo],
-//     partition_fields: &[FieldRef],
-//     filters: &[Expr],
-//     state: &dyn Session,
-// ) -> Result<Vec<usize>> {
-//     if filters.is_empty() || partition_fields.is_empty() {
-//         return Ok((0..partitions.len()).collect());
-//     }
-//
-//     let partition_schema = Arc::new(Schema::new(
-//         partition_fields
-//             .iter()
-//             .map(|f| f.as_ref().clone())
-//             .collect::<Vec<_>>(),
-//     ));
-//
-//     let partition_filters: Vec<&Expr> = filters
-//         .iter()
-//         .filter(|f| {
-//             f.column_refs()
-//                 .iter()
-//                 .all(|c| partition_schema.field_with_name(c.name()).is_ok())
-//         })
-//         .collect();
-//
-//     if partition_filters.is_empty() {
-//         return Ok((0..partitions.len()).collect());
-//     }
-//
-//     let df_schema = partition_schema.as_ref().clone().to_dfschema()?;
-//
-//     let mut columns: Vec<ArrayRef> = Vec::new();
-//     for (i, field) in partition_fields.iter().enumerate() {
-//         let values: Vec<Option<&str>> = partitions
-//             .iter()
-//             .map(|p| p.values.get(i).map(|s| s.as_str()))
-//             .collect();
-//         let array = build_partition_array(field.data_type(), &values)?;
-//         columns.push(array);
-//     }
-//
-//     let batch = datafusion::arrow::record_batch::RecordBatch::try_new(
-//         partition_schema.clone(),
-//         columns,
-//     )
-//     .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-//
-//     let mut surviving = Vec::new();
-//
-//     for row_idx in 0..partitions.len() {
-//         let mut keep = true;
-//         for filter_expr in &partition_filters {
-//             let physical_expr =
-//                 state.create_physical_expr((*filter_expr).clone(), &df_schema)?;
-//             let result = physical_expr.evaluate(&batch)?;
-//             let result_array = result.into_array(batch.num_rows())?;
-//             let bool_array = result_array
-//                 .as_any()
-//                 .downcast_ref::<BooleanArray>()
-//                 .ok_or_else(|| {
-//                     DataFusionError::Internal(
-//                         "partition filter did not produce boolean array".into(),
-//                     )
-//                 })?;
-//             if bool_array.is_null(row_idx) || !bool_array.value(row_idx) {
-//                 keep = false;
-//                 break;
-//             }
-//         }
-//         if keep {
-//             surviving.push(row_idx);
-//         }
-//     }
-//
-//     Ok(surviving)
-// }
+fn prune_partitions(
+    partitions: &[HivePartition],
+    partition_fields: &[Arc<Field>],
+    filters: &[Expr],
+    state: &dyn Session,
+) -> Result<Vec<usize>> {
+    if partition_fields.is_empty() {
+        return Err(DataFusionError::Internal("partition fields is empty".to_string()));
+    }
+    if filters.is_empty() {
+        return Ok((0..partitions.len()).collect());
+    }
+
+    let partition_schema = Arc::new(Schema::new(
+        partition_fields
+            .iter()
+            .map(|f| f.as_ref().clone())
+            .collect::<Vec<_>>(),
+    ));
+
+    let partition_col_name_set: HashSet<String> = partition_schema
+        .fields()
+        .iter()
+        .map(|field| field.name().to_ascii_lowercase())
+        .collect();
+
+    let partition_filters: Vec<&Expr> = filters
+        .iter()
+        .filter(|f| {
+            !f.column_refs().is_empty()
+                && f.column_refs()
+                    .iter()
+                    .all(|c| partition_col_name_set.contains(&c.name().to_ascii_lowercase()))
+        })
+        .collect();
+
+    if partition_filters.is_empty() {
+        return Ok((0..partitions.len()).collect());
+    }
+
+    let df_schema = partition_schema.as_ref().clone().to_dfschema()?;
+    let mut columns: Vec<ArrayRef> = Vec::with_capacity(partition_fields.len());
+    for (field_idx, field) in partition_fields.iter().enumerate() {
+        let values: Vec<Option<&str>> = partitions
+            .iter()
+            .map(|partition| {
+                partition
+                    .partition_values
+                    .get(field_idx)
+                    .map(|value| value.as_str())
+            })
+            .collect();
+        columns.push(build_partition_array(field.data_type(), &values)?);
+    }
+
+    let batch = RecordBatch::try_new(partition_schema, columns)
+        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+    let compiled_filters = partition_filters
+        .into_iter()
+        .map(|filter| state.create_physical_expr(filter.clone(), &df_schema))
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut filter_result: Option<BooleanArray> = None;
+    for filter in compiled_filters {
+        let result_array = filter.evaluate(&batch)?.to_array_of_size(batch.num_rows())?;
+        let bool_array = result_array
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .ok_or_else(|| {
+                DataFusionError::Internal("partition filter did not produce boolean array".into())
+            })?;
+        filter_result = Some(match filter_result {
+            None => bool_array.clone(),
+            Some(acc) => compute::and(&acc, bool_array)
+                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+        });
+    }
+
+    let mut surviving = Vec::new();
+    match filter_result {
+        None => surviving.extend(0..partitions.len()),
+        Some(combined_array) => {
+            for row_idx in 0..partitions.len() {
+                if !combined_array.is_null(row_idx) && combined_array.value(row_idx) {
+                    surviving.push(row_idx);
+                }
+            }
+        }
+    }
+
+    Ok(surviving)
+}
 
 #[allow(unused)]
 fn build_partition_array(data_type: &DataType, values: &[Option<&str>]) -> Result<ArrayRef> {
@@ -781,6 +695,10 @@ fn location_to_object_store_path(location: &str) -> Result<Path> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datafusion::arrow::datatypes::Field;
+    use datafusion::logical_expr::expr::InList;
+    use datafusion::logical_expr::{Operator, binary_expr, col, lit};
+    use datafusion::prelude::SessionContext;
 
     #[test]
     fn test_location_to_object_store_path() {
@@ -804,5 +722,140 @@ mod tests {
             path.as_ref(),
             "hive/tpch_hive.db/textfile_partition_table/p=1"
         );
+    }
+
+    #[tokio::test]
+    async fn test_prune_partitions_eq() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[binary_expr(col("dt"), Operator::Eq, lit("2012-01-03"))],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_prune_partitions_in_list_and_gt() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let in_list = Expr::InList(InList::new(
+            Box::new(col("dt")),
+            vec![lit("2012-01-01"), lit("2012-01-04")],
+            false,
+        ));
+        let gt = binary_expr(col("dt"), Operator::Gt, lit("2012-01-01"));
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[in_list, gt],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![2]);
+    }
+
+    #[tokio::test]
+    async fn test_prune_partitions_ignores_mixed_data_filters() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[
+                binary_expr(col("dt"), Operator::Eq, lit("2012-01-03")),
+                binary_expr(col("c1"), Operator::Gt, lit(10_i32)),
+            ],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_prune_partitions_without_partition_filter_keeps_all() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = sample_partitions();
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[binary_expr(col("c1"), Operator::Gt, lit(10_i32))],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![0, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn test_prune_partitions_null_partition_does_not_match() {
+        let state = SessionContext::new();
+        let partition_fields = partition_fields();
+        let partitions = vec![
+            HivePartition {
+                location:
+                    "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=__HIVE_DEFAULT_PARTITION__"
+                        .to_string(),
+                partition_values: vec!["__HIVE_DEFAULT_PARTITION__".to_string()],
+            },
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=".to_string(),
+                partition_values: vec!["".to_string()],
+            },
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03"
+                    .to_string(),
+                partition_values: vec!["2012-01-03".to_string()],
+            },
+        ];
+
+        let surviving = prune_partitions(
+            &partitions,
+            &partition_fields,
+            &[binary_expr(col("dt"), Operator::Eq, lit("2012-01-03"))],
+            &state.state(),
+        )
+        .unwrap();
+
+        assert_eq!(surviving, vec![2]);
+    }
+
+    fn partition_fields() -> Vec<Arc<Field>> {
+        vec![Arc::new(Field::new("dt", DataType::Utf8, true))]
+    }
+
+    fn sample_partitions() -> Vec<HivePartition> {
+        vec![
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-01"
+                    .to_string(),
+                partition_values: vec!["2012-01-01".to_string()],
+            },
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-03"
+                    .to_string(),
+                partition_values: vec!["2012-01-03".to_string()],
+            },
+            HivePartition {
+                location: "s3://warehouse/hive/tpch_hive.db/parquet_table/dt=2012-01-04"
+                    .to_string(),
+                partition_values: vec!["2012-01-04".to_string()],
+            },
+        ]
     }
 }
