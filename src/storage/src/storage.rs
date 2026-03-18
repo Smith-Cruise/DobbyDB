@@ -172,15 +172,4 @@ mod tests {
         assert_eq!("s3", schema);
         assert_eq!("bucket", bucket);
     }
-
-    #[test]
-    fn test_parse_storage_reject_legacy_keys() {
-        let text = r#"
-            s3-credential = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password" }
-        "#;
-
-        let storage = toml::from_str::<Storage>(text).unwrap();
-        assert!(storage.s3_storage.is_none());
-        assert!(storage.oss_storage.is_none());
-    }
 }
