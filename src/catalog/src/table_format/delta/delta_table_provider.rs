@@ -1,4 +1,3 @@
-use crate::storage::StorageCredential;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::Session;
 use datafusion::common::Result;
@@ -12,6 +11,7 @@ use deltalake::DeltaTableBuilder;
 use deltalake::delta_datafusion::DeltaScanNext;
 use deltalake::delta_datafusion::engine::AsObjectStoreUrl;
 use deltalake::logstore::{LogStore, LogStoreRef};
+use dobbydb_storage::storage::Storage;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,10 +27,10 @@ impl DeltaTableProvider {
     pub async fn try_new(
         _table_reference: TableReference,
         table_location: String,
-        storage_credential: Option<StorageCredential>,
+        storage: Option<Storage>,
     ) -> Result<Self> {
-        let storage_options = if let Some(storage_credential) = &storage_credential {
-            storage_credential.build_delta_storage_options()
+        let storage_options = if let Some(storage) = &storage {
+            storage.build_delta_storage_options()
         } else {
             HashMap::new()
         };

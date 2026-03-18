@@ -1,4 +1,3 @@
-use crate::storage::parse_location_schema_host;
 use crate::table_format::iceberg::expr_to_predicate::convert_filters_to_predicate;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::memory::DataSourceExec;
@@ -15,6 +14,7 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
+use dobbydb_storage::storage::parse_location_schema_bucket;
 use futures::StreamExt;
 use iceberg::spec::DataFileFormat;
 use iceberg::table::Table;
@@ -104,7 +104,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
             }
         };
 
-        let (path_schema, path_host) = parse_location_schema_host(metadata_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_bucket(metadata_location)?;
 
         let data_file_truncate = IcebergDataFilePathTruncate::try_new(metadata_location)?;
 
@@ -155,7 +155,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
         // ))?;
 
         let file_scan_config = FileScanConfigBuilder::new(
-            ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?,
+            ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?,
             Arc::new(file_source),
         )
         .with_file_group(FileGroup::new(partition_fields))
@@ -181,9 +181,9 @@ struct IcebergDataFilePathTruncate {
 
 impl IcebergDataFilePathTruncate {
     fn try_new(path: &str) -> Result<Self> {
-        let (schema, host) = parse_location_schema_host(path)?;
+        let (path_schema, path_bucket) = parse_location_schema_bucket(path)?;
         Ok(IcebergDataFilePathTruncate {
-            base_path: format!("{}://{}", schema, host),
+            base_path: format!("{}://{}", path_schema, path_bucket),
         })
     }
 

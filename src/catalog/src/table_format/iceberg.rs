@@ -1,10 +1,10 @@
-use crate::storage::StorageCredential;
 use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
 use crate::table_format::iceberg::table_provider::IcebergTableProvider;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
+use dobbydb_storage::storage::Storage;
 use iceberg::io::FileIO;
 use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
@@ -24,7 +24,7 @@ impl IcebergTableProviderFactory {
         table_reference: TableReference,
         metadata_location: String,
         metadata_table_name: Option<String>,
-        storage_credential: Option<StorageCredential>,
+        storage: Option<Storage>,
     ) -> Result<Arc<dyn TableProvider>> {
         let schema_name: String;
         let table_name: String;
@@ -41,8 +41,8 @@ impl IcebergTableProviderFactory {
                 return Err(DataFusionError::Plan("invalid table reference".to_string()));
             }
         }
-        let file_io_properties = if let Some(credential) = &storage_credential {
-            credential.build_iceberg_file_io_properties()
+        let file_io_properties = if let Some(storage) = &storage {
+            storage.build_iceberg_file_io_properties()
         } else {
             HashMap::new()
         };
@@ -74,7 +74,7 @@ impl IcebergTableProviderFactory {
             //     .map_err(|e| DataFusionError::External(Box::new(e)))?;
             // Ok(Arc::new(iceberg_table))
             let iceberg_table =
-                IcebergTableProvider::try_new_from_table(iceberg_table, storage_credential).await?;
+                IcebergTableProvider::try_new_from_table(iceberg_table, storage).await?;
             Ok(Arc::new(iceberg_table))
         }
     }

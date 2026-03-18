@@ -1,4 +1,3 @@
-use crate::storage::{StorageCredential, parse_location_schema_host};
 use crate::table_format::hive::HiveStorageInfo;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
@@ -31,6 +30,7 @@ use datafusion::object_store::path::Path;
 use datafusion::object_store::{ObjectMeta, ObjectStore};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
+use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
 use futures::StreamExt;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -41,19 +41,19 @@ use url::Url;
 pub struct HiveTableProvider {
     hive_storage_info: HiveStorageInfo,
     partitions: Vec<HivePartition>,
-    storage_credential: Option<StorageCredential>,
+    storage: Option<Storage>,
 }
 
 impl HiveTableProvider {
     pub fn new(
         hive_storage_info: HiveStorageInfo,
         partitions: Vec<HivePartition>,
-        storage_credential: Option<StorageCredential>,
+        storage: Option<Storage>,
     ) -> Self {
         Self {
             hive_storage_info,
             partitions,
-            storage_credential,
+            storage,
         }
     }
 }
@@ -79,13 +79,13 @@ impl TableProvider for HiveTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        if let Some(cred) = &self.storage_credential {
-            cred.register_into_session(&self.hive_storage_info.table_location, state)?;
+        if let Some(storage) = &self.storage {
+            storage.register_into_session(&self.hive_storage_info.table_location, state)?;
         }
 
-        let (path_schema, path_host) =
-            parse_location_schema_host(&self.hive_storage_info.table_location)?;
-        let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_host))?;
+        let (path_schema, path_bucket) =
+            parse_location_schema_bucket(&self.hive_storage_info.table_location)?;
+        let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
 
         let object_store = state.runtime_env().object_store(&store_url)?;
 

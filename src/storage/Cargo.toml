@@ -1,0 +1,14 @@
+[package]
+name = "dobbydb-storage"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+object_store_opendal = "0.55.0"
+opendal = { version = "0.55.0", features = ["services-s3", "services-oss"] }
+serde = { workspace = true }
+datafusion = { workspace = true }
+url = { workspace = true }
+iceberg = { workspace = true }
+deltalake = { workspace = true }
+toml = { workspace = true }

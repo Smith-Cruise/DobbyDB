@@ -1,5 +1,4 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::StorageCredential;
 use crate::table_format::table_provider_factory::{
     TableProviderBuilder, deduce_table_format, split_table_name,
 };
@@ -11,6 +10,7 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
+use dobbydb_storage::storage::Storage;
 use iceberg::inspect::MetadataTableType;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -29,7 +29,7 @@ pub struct GlueCatalogConfig {
     #[serde(rename = "aws-glue-secret-key")]
     pub aws_glue_secret_key: Option<String>,
     #[serde(flatten)]
-    pub storage_credential: Option<StorageCredential>,
+    pub storage: Option<Storage>,
 }
 
 async fn build_glue_client(config: &GlueCatalogConfig) -> Client {

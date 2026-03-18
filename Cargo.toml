@@ -7,8 +7,8 @@ resolver = "2"
 members = [
     "src/catalog",
     "src/server",
-    "src/sql"
-]
+    "src/sql",
+    "src/storage"]
 
 [workspace.dependencies]
 datafusion = "52.1.0"
@@ -20,6 +20,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.5"
 futures = "0.3.31"
 async-trait = "0.1.88"
+url = "2.5.7"
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "01a6a431d641202d6428f7d3af1e8ce27985e3a2", features = ["storage-oss", "storage-s3"]}
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "01a6a431d641202d6428f7d3af1e8ce27985e3a2", package = "iceberg-datafusion" }
 #iceberg = { version = "0.8.0", features = ["storage-oss", "storage-s3"] }
@@ -29,3 +30,4 @@ deltalake-aws = "0.14.0"
 dobbydb-catalog = { path = "src/catalog" }
 dobbydb-server = { path = "src/server" }
 dobbydb-sql = { path = "src/sql" }
+dobbydb-storage = {path = "src/storage"}
