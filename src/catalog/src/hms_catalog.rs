@@ -1,5 +1,4 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::StorageCredential;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
@@ -11,6 +10,7 @@ use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
+use dobbydb_storage::storage::Storage;
 use hive_metastore::{
     GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder,
 };
@@ -29,7 +29,7 @@ pub struct HMSCatalogConfig {
     #[serde(rename = "metastore-uri")]
     pub metastore_uri: String,
     #[serde(flatten)]
-    pub storage_credential: Option<StorageCredential>,
+    pub storage: Option<Storage>,
 }
 
 fn build_hms_client(config: &Arc<HMSCatalogConfig>) -> Result<ThriftHiveMetastoreClient> {

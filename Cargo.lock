@@ -2601,6 +2601,7 @@ dependencies = [
  "datafusion",
  "deltalake",
  "deltalake-aws",
+ "dobbydb-storage",
  "futures",
  "hive_metastore",
  "iceberg",
@@ -2634,6 +2635,20 @@ dependencies = [
  "dobbydb-catalog",
  "sqlparser",
  "tokio",
+]
+
+[[package]]
+name = "dobbydb-storage"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "deltalake",
+ "iceberg",
+ "object_store_opendal",
+ "opendal",
+ "serde",
+ "toml",
+ "url",
 ]
 
 [[package]]
@@ -4224,6 +4239,22 @@ dependencies = [
  "walkdir",
  "wasm-bindgen-futures",
  "web-time",
+]
+
+[[package]]
+name = "object_store_opendal"
+version = "0.55.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "113ab0769e972eee585e57407b98de08bda5354fa28e8ba4d89038d6cb6a8991"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "futures",
+ "object_store",
+ "opendal",
+ "pin-project",
+ "tokio",
 ]
 
 [[package]]

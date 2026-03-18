@@ -1,4 +1,3 @@
-use crate::storage::StorageCredential;
 use crate::table_format::iceberg::table_scan::IcebergTableScanBuilder;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::Schema;
@@ -9,6 +8,7 @@ use datafusion::datasource::TableType;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
+use dobbydb_storage::storage::Storage;
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::table::Table;
 use std::any::Any;
@@ -19,14 +19,11 @@ pub struct IcebergTableProvider {
     table: Table,
     snapshot_id: Option<i64>,
     schema: Arc<Schema>,
-    storage_credential: Option<StorageCredential>,
+    storage: Option<Storage>,
 }
 
 impl IcebergTableProvider {
-    pub async fn try_new_from_table(
-        table: Table,
-        storage_credential: Option<StorageCredential>,
-    ) -> Result<Self> {
+    pub async fn try_new_from_table(table: Table, storage: Option<Storage>) -> Result<Self> {
         let schema = Arc::new(
             schema_to_arrow_schema(table.metadata().current_schema())
                 .map_err(|e| DataFusionError::External(Box::new(e)))?,
@@ -35,7 +32,7 @@ impl IcebergTableProvider {
             table,
             snapshot_id: None,
             schema,
-            storage_credential,
+            storage,
         })
     }
 }
@@ -74,8 +71,8 @@ impl TableProvider for IcebergTableProvider {
                 "metadata location not found.".into(),
             ))?
         };
-        if let Some(credential) = &self.storage_credential {
-            credential.register_into_session(metadata_location, state)?;
+        if let Some(storage) = &self.storage {
+            storage.register_into_session(metadata_location, state)?;
         }
         builder = builder
             .with_snapshot_id(self.snapshot_id)

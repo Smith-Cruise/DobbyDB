@@ -1,5 +1,4 @@
 use crate::catalog::CatalogConfig;
-use crate::storage::StorageCredential;
 use crate::table_format::TableFormat;
 use crate::table_format::delta::DeltaTableProviderFactory;
 use crate::table_format::hive::HiveTableProviderFactory;
@@ -10,6 +9,7 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
+use dobbydb_storage::storage::Storage;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub struct TableProviderBuilder {
     metadata_table_name: Option<String>,
     hive_storage_info: Option<HiveStorageInfo>,
     hive_partitions: Option<Vec<HivePartition>>,
-    storage_credential: Option<StorageCredential>,
+    storage: Option<Storage>,
 }
 
 impl TableProviderBuilder {
@@ -30,9 +30,9 @@ impl TableProviderBuilder {
         table_format: TableFormat,
         catalog_config: CatalogConfig,
     ) -> Self {
-        let storage_credential = match catalog_config {
-            CatalogConfig::GLUE(glue_config) => glue_config.storage_credential.clone(),
-            CatalogConfig::HMS(hms_config) => hms_config.storage_credential.clone(),
+        let storage = match catalog_config {
+            CatalogConfig::GLUE(glue_config) => glue_config.storage.clone(),
+            CatalogConfig::HMS(hms_config) => hms_config.storage.clone(),
         };
         Self {
             table_reference,
@@ -41,7 +41,7 @@ impl TableProviderBuilder {
             metadata_table_name: None,
             hive_storage_info: None,
             hive_partitions: None,
-            storage_credential,
+            storage,
         }
     }
 
@@ -75,7 +75,7 @@ impl TableProviderBuilder {
                     self.table_reference,
                     iceberg_metadata_location.clone(),
                     self.metadata_table_name,
-                    self.storage_credential,
+                    self.storage,
                 )
                 .await
             }
@@ -87,7 +87,7 @@ impl TableProviderBuilder {
                 DeltaTableProviderFactory::try_create_table_provider(
                     self.table_reference,
                     table_location.clone(),
-                    self.storage_credential,
+                    self.storage,
                 )
                 .await
             }
@@ -96,7 +96,7 @@ impl TableProviderBuilder {
                     HiveTableProviderFactory::try_create_table_provider(
                         storage_info,
                         partitions,
-                        self.storage_credential,
+                        self.storage,
                     )
                 }
                 _ => Err(DataFusionError::Internal(

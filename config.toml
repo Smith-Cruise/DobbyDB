@@ -3,9 +3,7 @@ name = "glue_catalog"
 aws-glue-region = "us-west-2"
 aws-glue-access-key = "ak"
 aws-glue-secret-key = "sk"
-aws-s3-region = "us-west-2"
-aws-s3-access-key = "ak"
-aws-s3-secret-key = "sk"
+s3-storage = { region = "us-west-2", access-key = "ak", secret-key = "sk" }
 
 [[hms]]
 name = "hms_1"
