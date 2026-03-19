@@ -5,11 +5,13 @@ use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
 use dobbydb_storage::storage::Storage;
-use iceberg::io::FileIO;
+use iceberg::io::{FileIO, FileIOBuilder, LocalFsStorageFactory};
 use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
+use iceberg_storage_opendal::OpenDalStorageFactory;
 use std::collections::HashMap;
 use std::sync::Arc;
+use url::Url;
 
 mod expr_to_predicate;
 mod metadata_scan;
@@ -46,11 +48,7 @@ impl IcebergTableProviderFactory {
         } else {
             HashMap::new()
         };
-        let file_io = FileIO::from_path(&metadata_location)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?
-            .with_props(file_io_properties)
-            .build()
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let file_io = build_file_io(&metadata_location, file_io_properties)?;
 
         let iceberg_identifier: TableIdent = TableIdent {
             namespace: NamespaceIdent::new(schema_name),
@@ -78,4 +76,33 @@ impl IcebergTableProviderFactory {
             Ok(Arc::new(iceberg_table))
         }
     }
+}
+
+fn build_file_io(
+    metadata_location: &str,
+    file_io_properties: HashMap<String, String>,
+) -> Result<FileIO> {
+    let parsed =
+        Url::parse(metadata_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+    let scheme = parsed.scheme();
+    let builder = match scheme {
+        "file" => {
+            return Ok(FileIOBuilder::new(Arc::new(LocalFsStorageFactory))
+                .with_props(file_io_properties)
+                .build());
+        }
+        "s3" | "s3a" => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
+            configured_scheme: scheme.to_string(),
+            customized_credential_load: None,
+        })),
+        "oss" => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Oss)),
+        _ => {
+            return Err(DataFusionError::NotImplemented(format!(
+                "unsupported iceberg storage scheme: {scheme}"
+            )));
+        }
+    };
+
+    Ok(builder.with_props(file_io_properties).build())
 }
