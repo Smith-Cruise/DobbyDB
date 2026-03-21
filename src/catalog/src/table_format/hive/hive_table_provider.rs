@@ -2,6 +2,7 @@ use crate::table_format::hive::HiveStorageInfo;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
 use async_trait::async_trait;
+use bytes::Bytes;
 use datafusion::arrow::array::{
     Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int8Array, Int16Array,
     Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
@@ -19,7 +20,8 @@ use datafusion::datasource::TableType;
 use datafusion::datasource::file_format::file_compression_type::FileCompressionType;
 use datafusion::datasource::listing::PartitionedFile;
 use datafusion::datasource::physical_plan::{
-    CsvSource, FileGroup, FileScanConfigBuilder, ParquetSource,
+    CsvSource, FileGroup, FileScanConfigBuilder, ParquetFileMetrics, ParquetFileReaderFactory,
+    ParquetSource,
 };
 use datafusion::datasource::table_schema::TableSchema;
 use datafusion::error::DataFusionError;
@@ -28,16 +30,126 @@ use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::object_store::path::Path;
 use datafusion::object_store::{ObjectMeta, ObjectStore};
+use datafusion::parquet::arrow::arrow_reader::ArrowReaderOptions;
+use datafusion::parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader};
+use datafusion::parquet::file::metadata::ParquetMetaData;
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::scalar::ScalarValue;
 use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use futures::stream;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::Arc;
+use std::ops::Range;
+use std::sync::{Arc, OnceLock};
+use tokio::runtime::{Builder, Runtime};
 use url::Url;
+
+fn get_hive_parquet_io_runtime() -> &'static Runtime {
+    static HIVE_PARQUET_IO_RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    HIVE_PARQUET_IO_RUNTIME.get_or_init(|| {
+        eprintln!("Hive parquet scan enabled hard-coded IO runtime: dobby-hive-io");
+        Builder::new_multi_thread()
+            .worker_threads(8)
+            .thread_name("dobby-hive-io")
+            .enable_all()
+            .build()
+            .expect("failed to build hive parquet io runtime")
+    })
+}
+
+#[derive(Debug)]
+struct HiveParquetFileReaderFactory {
+    store: Arc<dyn ObjectStore>,
+}
+
+impl HiveParquetFileReaderFactory {
+    fn new(store: Arc<dyn ObjectStore>) -> Self {
+        Self { store }
+    }
+}
+
+struct HiveParquetFileReader {
+    file_metrics: ParquetFileMetrics,
+    inner: ParquetObjectReader,
+    partitioned_file: PartitionedFile,
+}
+
+impl AsyncFileReader for HiveParquetFileReader {
+    fn get_bytes(
+        &mut self,
+        range: Range<u64>,
+    ) -> BoxFuture<'_, datafusion::parquet::errors::Result<Bytes>> {
+        let bytes_scanned = range.end - range.start;
+        self.file_metrics.bytes_scanned.add(bytes_scanned as usize);
+        self.inner.get_bytes(range)
+    }
+
+    fn get_byte_ranges(
+        &mut self,
+        ranges: Vec<Range<u64>>,
+    ) -> BoxFuture<'_, datafusion::parquet::errors::Result<Vec<Bytes>>>
+    where
+        Self: Send,
+    {
+        let total: u64 = ranges.iter().map(|r| r.end - r.start).sum();
+        self.file_metrics.bytes_scanned.add(total as usize);
+        self.inner.get_byte_ranges(ranges)
+    }
+
+    fn get_metadata<'a>(
+        &'a mut self,
+        options: Option<&'a ArrowReaderOptions>,
+    ) -> BoxFuture<'a, datafusion::parquet::errors::Result<Arc<ParquetMetaData>>> {
+        self.inner.get_metadata(options)
+    }
+}
+
+impl Drop for HiveParquetFileReader {
+    fn drop(&mut self) {
+        self.file_metrics
+            .scan_efficiency_ratio
+            .add_part(self.file_metrics.bytes_scanned.value());
+        self.file_metrics
+            .scan_efficiency_ratio
+            .set_total(self.partitioned_file.object_meta.size as usize);
+    }
+}
+
+impl ParquetFileReaderFactory for HiveParquetFileReaderFactory {
+    fn create_reader(
+        &self,
+        partition_index: usize,
+        partitioned_file: PartitionedFile,
+        metadata_size_hint: Option<usize>,
+        metrics: &ExecutionPlanMetricsSet,
+    ) -> Result<Box<dyn AsyncFileReader + Send>> {
+        let file_metrics = ParquetFileMetrics::new(
+            partition_index,
+            partitioned_file.object_meta.location.as_ref(),
+            metrics,
+        );
+        let mut inner = ParquetObjectReader::new(
+            Arc::clone(&self.store),
+            partitioned_file.object_meta.location.clone(),
+        )
+        .with_file_size(partitioned_file.object_meta.size)
+        .with_runtime(get_hive_parquet_io_runtime().handle().clone());
+
+        if let Some(hint) = metadata_size_hint {
+            inner = inner.with_footer_size_hint(hint);
+        }
+
+        Ok(Box::new(HiveParquetFileReader {
+            file_metrics,
+            inner,
+            partitioned_file,
+        }))
+    }
+}
 
 #[derive(Debug)]
 pub struct HiveTableProvider {
@@ -154,6 +266,7 @@ impl TableProvider for HiveTableProvider {
                 file_group,
                 &filter_data_filters(filters, self.hive_storage_info.table_schema.file_schema()),
                 state,
+                Arc::clone(&object_store),
                 self.hive_storage_info.table_schema.file_schema(),
                 projection,
                 limit,
@@ -326,6 +439,7 @@ fn build_parquet_exec(
     file_group: FileGroup,
     filters: &[Expr],
     state: &dyn Session,
+    object_store: Arc<dyn ObjectStore>,
     data_schema: &SchemaRef,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
@@ -335,6 +449,9 @@ fn build_parquet_exec(
     parquet_options.global.reorder_filters = true;
 
     let mut source = ParquetSource::new(table_schema).with_table_parquet_options(parquet_options);
+    source = source.with_parquet_file_reader_factory(Arc::new(HiveParquetFileReaderFactory::new(
+        object_store,
+    )));
 
     let df_schema = data_schema.as_ref().clone().to_dfschema()?;
     let predicate = conjunction(filters.iter().cloned())

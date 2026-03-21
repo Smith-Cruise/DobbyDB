@@ -7,6 +7,7 @@ edition = { workspace = true }
 dobbydb-storage = {workspace = true}
 serde = { workspace = true }
 datafusion = { workspace = true }
+bytes = "1"
 toml = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
