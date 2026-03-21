@@ -754,6 +754,8 @@ mod tests {
     use std::pin::Pin;
     use tokio::time::{Duration, sleep};
 
+    type PartitionedFileTask = Pin<Box<dyn Future<Output = Result<Vec<PartitionedFile>>>>>;
+
     #[test]
     fn test_location_to_object_store_path() {
         let path = location_to_object_store_path(
@@ -1047,7 +1049,7 @@ mod tests {
         put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
         put_test_object(&store, "table/dt=2024-01-02/file2.parquet", b"b").await;
 
-        let tasks: Vec<Pin<Box<dyn Future<Output = Result<Vec<PartitionedFile>>>>>> = vec![
+        let tasks: Vec<PartitionedFileTask> = vec![
             {
                 let store = Arc::clone(&store);
                 Box::pin(async move {
@@ -1108,7 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_partitioned_files_fail_fast_on_partition_error() {
-        let tasks: Vec<Pin<Box<dyn Future<Output = Result<Vec<PartitionedFile>>>>>> = vec![
+        let tasks: Vec<PartitionedFileTask> = vec![
             Box::pin(async {
                 sleep(Duration::from_millis(20)).await;
                 Ok(Vec::<PartitionedFile>::new())
