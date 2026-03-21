@@ -32,8 +32,10 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
 use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
 use futures::StreamExt;
+use futures::stream;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use url::Url;
 
@@ -97,27 +99,42 @@ impl TableProvider for HiveTableProvider {
                 .map(|file_object_meta| PartitionedFile::from(file_object_meta.clone()))
                 .collect()
         } else {
-            let surviving_partition_indices = prune_partitions(
+            let selected_partition_indices = prune_partitions(
                 &self.partitions,
                 self.hive_storage_info.table_schema.table_partition_cols(),
                 filters,
                 state,
             )?;
-            let mut result: Vec<PartitionedFile> = Vec::new();
-            for partition_idx in surviving_partition_indices {
-                let partition = &self.partitions[partition_idx];
-                let file_object_metas = list_files(&object_store, &partition.location).await?;
-                let partition_values = build_partition_values(
-                    self.hive_storage_info.table_schema.table_partition_cols(),
-                    partition,
-                )?;
-                result.extend(file_object_metas.iter().map(|file_object_meta| {
-                    let mut partition_field = PartitionedFile::from(file_object_meta.clone());
-                    partition_field.partition_values = partition_values.clone();
-                    partition_field
-                }));
-            }
-            result
+
+            let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
+            let partition_scan_tasks = selected_partition_indices
+                .into_iter()
+                .map(|partition_idx| {
+                    let partition = &self.partitions[partition_idx];
+                    let location = partition.location.clone();
+                    let partition_values = build_partition_values(
+                        self.hive_storage_info.table_schema.table_partition_cols(),
+                        partition,
+                    )?;
+                    let object_store = Arc::clone(&object_store);
+
+                    Ok(async move {
+                        let file_object_metas = list_files(&object_store, &location).await?;
+                        let partitioned_files = file_object_metas
+                            .into_iter()
+                            .map(|file_object_meta| {
+                                let mut partitioned_file = PartitionedFile::from(file_object_meta);
+                                partitioned_file.partition_values = partition_values.clone();
+                                partitioned_file
+                            })
+                            .collect();
+
+                        Ok(partitioned_files)
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            collect_partitioned_files(partition_scan_tasks, meta_fetch_concurrency).await?
         };
 
         let file_group = FileGroup::new(scan_file_list);
@@ -702,6 +719,24 @@ async fn list_files(
     Ok(results)
 }
 
+async fn collect_partitioned_files<I, Fut>(
+    tasks: I,
+    concurrency: usize,
+) -> Result<Vec<PartitionedFile>>
+where
+    I: IntoIterator<Item = Fut>,
+    Fut: Future<Output = Result<Vec<PartitionedFile>>>,
+{
+    let partitioned_files = stream::iter(tasks)
+        .buffer_unordered(concurrency)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(partitioned_files.into_iter().flatten().collect())
+}
+
 fn location_to_object_store_path(location: &str) -> Result<Path> {
     let parsed = Url::parse(location).map_err(|e| DataFusionError::External(e.into()))?;
     Ok(Path::from(parsed.path().trim_start_matches('/')))
@@ -713,7 +748,13 @@ mod tests {
     use datafusion::arrow::datatypes::Field;
     use datafusion::logical_expr::expr::InList;
     use datafusion::logical_expr::{Expr, Operator, binary_expr, col, lit};
+    use datafusion::object_store::memory::InMemory;
     use datafusion::prelude::SessionContext;
+    use std::collections::HashMap;
+    use std::pin::Pin;
+    use tokio::time::{Duration, sleep};
+
+    type PartitionedFileTask = Pin<Box<dyn Future<Output = Result<Vec<PartitionedFile>>>>>;
 
     #[test]
     fn test_location_to_object_store_path() {
@@ -738,6 +779,7 @@ mod tests {
             "hive/tpch_hive.db/textfile_partition_table/p=1"
         );
     }
+
     #[test]
     fn test_prune_partitions_eq() {
         let state = SessionContext::new();
@@ -992,5 +1034,115 @@ mod tests {
                 ],
             },
         ]
+    }
+
+    async fn put_test_object(store: &Arc<dyn ObjectStore>, path: &str, data: &[u8]) {
+        store
+            .put(&Path::from(path), data.to_vec().into())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_collect_partitioned_files_preserves_partition_values() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
+        put_test_object(&store, "table/dt=2024-01-02/file2.parquet", b"b").await;
+
+        let tasks: Vec<PartitionedFileTask> = vec![
+            {
+                let store = Arc::clone(&store);
+                Box::pin(async move {
+                    sleep(Duration::from_millis(30)).await;
+                    let partition_values = vec![ScalarValue::Utf8(Some("2024-01-01".to_string()))];
+                    let files = list_files(&store, "memory:///table/dt=2024-01-01")
+                        .await?
+                        .into_iter()
+                        .map(|file_object_meta| {
+                            let mut partitioned_file = PartitionedFile::from(file_object_meta);
+                            partitioned_file.partition_values = partition_values.clone();
+                            partitioned_file
+                        })
+                        .collect();
+                    Ok(files)
+                })
+            },
+            {
+                let store = Arc::clone(&store);
+                Box::pin(async move {
+                    let partition_values = vec![ScalarValue::Utf8(Some("2024-01-02".to_string()))];
+                    let files = list_files(&store, "memory:///table/dt=2024-01-02")
+                        .await?
+                        .into_iter()
+                        .map(|file_object_meta| {
+                            let mut partitioned_file = PartitionedFile::from(file_object_meta);
+                            partitioned_file.partition_values = partition_values.clone();
+                            partitioned_file
+                        })
+                        .collect();
+                    Ok(files)
+                })
+            },
+        ];
+
+        let files = collect_partitioned_files(tasks, 2).await.unwrap();
+
+        assert_eq!(files.len(), 2);
+        let file_to_partition_values: HashMap<&str, Vec<ScalarValue>> = files
+            .iter()
+            .map(|file| {
+                (
+                    file.object_meta.location.as_ref(),
+                    file.partition_values.clone(),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            file_to_partition_values.get("table/dt=2024-01-01/file1.parquet"),
+            Some(&vec![ScalarValue::Utf8(Some("2024-01-01".to_string()))])
+        );
+        assert_eq!(
+            file_to_partition_values.get("table/dt=2024-01-02/file2.parquet"),
+            Some(&vec![ScalarValue::Utf8(Some("2024-01-02".to_string()))])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_collect_partitioned_files_fail_fast_on_partition_error() {
+        let tasks: Vec<PartitionedFileTask> = vec![
+            Box::pin(async {
+                sleep(Duration::from_millis(20)).await;
+                Ok(Vec::<PartitionedFile>::new())
+            }),
+            Box::pin(async {
+                Err(DataFusionError::Internal(
+                    "failed to list one partition".to_string(),
+                ))
+            }),
+        ];
+
+        let err = collect_partitioned_files(tasks, 2).await.unwrap_err();
+
+        assert!(err.to_string().contains("failed to list one partition"));
+    }
+
+    #[tokio::test]
+    async fn test_list_files_filters_hidden_and_empty_objects() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
+        put_test_object(&store, "table/dt=2024-01-01/_temporary", b"a").await;
+        put_test_object(&store, "table/dt=2024-01-01/.metadata", b"a").await;
+        put_test_object(&store, "table/dt=2024-01-01/empty.parquet", b"").await;
+
+        let files = list_files(&store, "memory:///table/dt=2024-01-01")
+            .await
+            .unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].location.as_ref(),
+            "table/dt=2024-01-01/file1.parquet"
+        );
     }
 }
