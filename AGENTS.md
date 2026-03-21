@@ -27,3 +27,7 @@ Pass tests:
 ```bash
 cargo test --all-targets --all-features --verbose
 ```
+
+## Pull Request Requirements
+* PR title and descriptions must use English.
+* Keep the PR descriptions as concise as possible.
