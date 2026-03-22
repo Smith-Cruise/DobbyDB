@@ -1,4 +1,4 @@
-use crate::statements::ExtendedStatement;
+use crate::statements::{ExtendedStatement, ShowVariablesStatement};
 use datafusion::common::Result;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
@@ -6,6 +6,7 @@ use datafusion::error::DataFusionError;
 use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
+use sqlparser::ast::ShowStatementFilter;
 use sqlparser::dialect::{DatabricksDialect, Dialect};
 use std::collections::VecDeque;
 
@@ -153,14 +154,35 @@ impl<'a> ExtendedParser<'a> {
     fn parse_show(&mut self) -> Result<ExtendedStatement> {
         let token = self.parser.peek_token();
         if let Token::Word(w) = &token.token {
-            let val = w.value.to_ascii_uppercase();
-            if val == "CATALOGS" {
+            if w.value.eq_ignore_ascii_case("catalogs") {
                 self.parser.advance_token();
                 return Ok(ExtendedStatement::ShowCatalogsStatement);
             }
-        };
+
+            if w.keyword == Keyword::VARIABLES {
+                self.parser.advance_token();
+                return self.parse_show_variables();
+            }
+        }
         Ok(ExtendedStatement::SQLStatement(Box::from(
             self.parser.parse_show()?,
+        )))
+    }
+
+    fn parse_show_variables(&mut self) -> Result<ExtendedStatement> {
+        let verbose = self.parser.parse_keyword(Keyword::VERBOSE);
+        let filter = if self.parser.parse_keyword(Keyword::LIKE) {
+            Some(ShowStatementFilter::Like(
+                self.parser
+                    .parse_literal_string()
+                    .map_err(DataFusionError::from)?,
+            ))
+        } else {
+            None
+        };
+
+        Ok(ExtendedStatement::ShowVariablesStatement(Box::new(
+            ShowVariablesStatement { filter, verbose },
         )))
     }
 
@@ -185,7 +207,8 @@ impl<'a> ExtendedParser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::statements::ExtendedStatement::SQLStatement;
+    use crate::statements::ExtendedStatement::{SQLStatement, ShowVariablesStatement as ShowVars};
+    use crate::statements::ShowVariablesStatement;
     use sqlparser::ast::{Ident, ObjectName, ObjectNamePart, ShowStatementOptions, Statement, Use};
 
     #[test]
@@ -223,6 +246,54 @@ mod tests {
                 limit_from: None,
                 filter_position: None,
             },
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_variables() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show variables")?;
+        let stmt = &statement[0];
+        let expected_statement = ShowVars(Box::new(ShowVariablesStatement {
+            filter: None,
+            verbose: false,
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_variables_like() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show variables like '%xxxxxxx%'")?;
+        let stmt = &statement[0];
+        let expected_statement = ShowVars(Box::new(ShowVariablesStatement {
+            filter: Some(ShowStatementFilter::Like("%xxxxxxx%".to_string())),
+            verbose: false,
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_variables_verbose() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show variables verbose")?;
+        let stmt = &statement[0];
+        let expected_statement = ShowVars(Box::new(ShowVariablesStatement {
+            filter: None,
+            verbose: true,
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_variables_verbose_like() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show variables verbose like '%xxxxxxx%'")?;
+        let stmt = &statement[0];
+        let expected_statement = ShowVars(Box::new(ShowVariablesStatement {
+            filter: Some(ShowStatementFilter::Like("%xxxxxxx%".to_string())),
+            verbose: true,
         }));
         assert_eq!(expected_statement, *stmt);
         Ok(())

@@ -8,12 +8,13 @@ use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::logical_expr::LogicalPlanBuilder;
-use datafusion::logical_expr::sqlparser::ast::{Statement, Use};
+use datafusion::logical_expr::sqlparser::ast::{ShowStatementFilter, Statement, Use};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider};
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
-    INFORMATION_SCHEMA_SHOW_TABLES, INTERNAL_CATALOG, InternalCatalog,
+    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
+    InternalCatalog,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -146,6 +147,11 @@ impl ExtendedSessionContext {
                     .build_sql(),
                 );
             }
+            ExtendedStatement::ShowVariablesStatement(show_variables) => {
+                sql_string = Some(
+                    self.build_show_variables_sql(&show_variables.filter, show_variables.verbose)?,
+                );
+            }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
                     return self.handle_use_stmt(use_stmt).await;
@@ -187,6 +193,34 @@ impl ExtendedSessionContext {
 
     pub fn task_ctx(&self) -> Arc<TaskContext> {
         self.session_context.task_ctx()
+    }
+
+    fn build_show_variables_sql(
+        &self,
+        filter: &Option<ShowStatementFilter>,
+        verbose: bool,
+    ) -> Result<String> {
+        let columns = if verbose {
+            "name, value, description"
+        } else {
+            "name, value"
+        };
+        let base_sql = format!(
+            "SELECT {columns} FROM {}.{}.{}",
+            INTERNAL_CATALOG, INFORMATION_SCHEMA, INFORMATION_SCHEMA_SHOW_VARIABLES
+        );
+
+        let base_sql = match filter {
+            None => base_sql,
+            Some(ShowStatementFilter::Like(pattern)) => {
+                let escaped_pattern = pattern.replace('\'', "''");
+                format!("{base_sql} WHERE name LIKE '{escaped_pattern}'")
+            }
+            _ => return Err(DataFusionError::Plan(
+                "SHOW VARIABLES only supports LIKE filters".to_string(),
+            )),
+        };
+        Ok(format!("{base_sql} ORDER BY NAME"))
     }
 
     async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame> {
@@ -265,5 +299,76 @@ impl ExtendedSessionContext {
         self.session_context
             .execute_logical_plan(empty_logical_plan)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::arrow::util::pretty::pretty_format_batches;
+    use datafusion::common::assert_contains;
+
+    #[tokio::test]
+    async fn test_show_variables_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session.sql("show variables").await?.collect().await?;
+        let schema = batches[0].schema();
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_eq!(schema.fields().len(), 2);
+        assert_eq!(schema.field(0).name(), "name");
+        assert_eq!(schema.field(1).name(), "value");
+        assert_contains!(output.as_str(), "datafusion.execution.target_partitions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_variables_verbose_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show variables verbose")
+            .await?
+            .collect()
+            .await?;
+        let schema = batches[0].schema();
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.field(0).name(), "name");
+        assert_eq!(schema.field(1).name(), "value");
+        assert_eq!(schema.field(2).name(), "description");
+        assert_contains!(output.as_str(), "datafusion.execution.target_partitions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_variables_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show variables like '%target_partitions%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output, "datafusion.execution.target_partitions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_variables_verbose_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show variables verbose like '%target_partitions%'")
+            .await?
+            .collect()
+            .await?;
+        let schema = batches[0].schema();
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.field(2).name(), "description");
+        assert_contains!(output.as_str(), "datafusion.execution.target_partitions");
+        Ok(())
     }
 }

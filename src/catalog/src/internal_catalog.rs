@@ -7,6 +7,7 @@ use datafusion::catalog::{
     CatalogProvider, CatalogProviderList, MemorySchemaProvider, SchemaProvider,
 };
 use datafusion::common::Result;
+use datafusion::config::ConfigEntry;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -18,6 +19,7 @@ pub const INTERNAL_CATALOG: &str = "internal";
 pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
 pub const INFORMATION_SCHEMA_SHOW_SCHEMAS: &str = "schemas";
 pub const INFORMATION_SCHEMA_SHOW_TABLES: &str = "tables";
+pub const INFORMATION_SCHEMA_SHOW_VARIABLES: &str = "variables";
 
 #[derive(Debug)]
 pub struct InternalCatalog {
@@ -49,6 +51,14 @@ impl InternalCatalog {
             INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
             Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
                 InformationSchemaShowTables::new(catalog_provider_list.clone()),
+            ))?),
+        )?;
+
+        // show variables
+        information_schema.register_table(
+            INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
+            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+                InformationSchemaShowVariables::new(),
             ))?),
         )?;
         Ok(Self { information_schema })
@@ -294,6 +304,87 @@ impl PartitionStream for InformationSchemaShowTables {
             vec![Arc::new(table_name_builder.finish())],
         )
         .unwrap();
+        Box::pin(RecordBatchStreamAdapter::new(
+            Arc::clone(&self.schema),
+            futures::stream::once(async move { Ok(batch) }),
+        ))
+    }
+}
+
+#[derive(Debug)]
+struct InformationSchemaShowVariables {
+    schema: SchemaRef,
+}
+
+impl InformationSchemaShowVariables {
+    fn new() -> Self {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("value", DataType::Utf8, true),
+            Field::new("description", DataType::Utf8, false),
+        ]));
+
+        Self { schema }
+    }
+
+    fn append_setting(
+        name_builder: &mut StringBuilder,
+        value_builder: &mut StringBuilder,
+        description_builder: &mut StringBuilder,
+        entry: ConfigEntry,
+    ) {
+        name_builder.append_value(entry.key);
+        value_builder.append_option(entry.value);
+        description_builder.append_value(entry.description);
+    }
+}
+
+impl PartitionStream for InformationSchemaShowVariables {
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
+        let mut name_builder = StringBuilder::new();
+        let mut value_builder = StringBuilder::new();
+        let mut description_builder = StringBuilder::new();
+
+        for entry in ctx.session_config().options().entries() {
+            Self::append_setting(
+                &mut name_builder,
+                &mut value_builder,
+                &mut description_builder,
+                entry,
+            );
+        }
+
+        for entry in ctx.runtime_env().config_entries() {
+            Self::append_setting(
+                &mut name_builder,
+                &mut value_builder,
+                &mut description_builder,
+                entry,
+            );
+        }
+
+        let batch = match RecordBatch::try_new(
+            Arc::clone(&self.schema),
+            vec![
+                Arc::new(name_builder.finish()),
+                Arc::new(value_builder.finish()),
+                Arc::new(description_builder.finish()),
+            ],
+        ) {
+            Ok(record_batch) => record_batch,
+            Err(error) => {
+                let error = DataFusionError::External(Box::new(error));
+                return Box::pin(RecordBatchStreamAdapter::new(
+                    self.schema.clone(),
+                    futures::stream::once(async move { Err(error) }),
+                ));
+            }
+        };
+
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&self.schema),
             futures::stream::once(async move { Ok(batch) }),
