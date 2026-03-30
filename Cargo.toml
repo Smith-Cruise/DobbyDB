@@ -6,15 +6,17 @@ edition = "2024"
 resolver = "2"
 members = [
     "src/catalog",
+    "src/common",
     "src/server",
     "src/sql",
-    "src/storage"]
+    "src/storage"
+]
 
 [workspace.dependencies]
 datafusion = "52.1.0"
 datafusion-cli = "52.1.0"
 sqlparser = "0.59.0"
-tokio = { version = "1.0", features = ["rt-multi-thread", "tracing"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "tracing", "rt"] }
 console-subscriber = "0.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.5"
@@ -30,3 +32,4 @@ dobbydb-catalog = { path = "src/catalog" }
 dobbydb-server = { path = "src/server" }
 dobbydb-sql = { path = "src/sql" }
 dobbydb-storage = {path = "src/storage"}
+dobbydb-common = {path = "src/common"}

@@ -1,3 +1,4 @@
+use crate::data_file_format::parquet::ExtendedParquetFileReaderFactory;
 use crate::table_format::hive::HiveStorageInfo;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
@@ -334,7 +335,14 @@ fn build_parquet_exec(
     parquet_options.global.pushdown_filters = true;
     parquet_options.global.reorder_filters = true;
 
-    let mut source = ParquetSource::new(table_schema).with_table_parquet_options(parquet_options);
+    let store = state.runtime_env().object_store(&store_url)?;
+
+    let parquet_file_reader_factory =
+        Arc::new(ExtendedParquetFileReaderFactory::new(store.clone()));
+
+    let mut source = ParquetSource::new(table_schema)
+        .with_table_parquet_options(parquet_options)
+        .with_parquet_file_reader_factory(parquet_file_reader_factory);
 
     let df_schema = data_schema.as_ref().clone().to_dfschema()?;
     let predicate = conjunction(filters.iter().cloned())

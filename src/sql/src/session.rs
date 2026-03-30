@@ -216,9 +216,11 @@ impl ExtendedSessionContext {
                 let escaped_pattern = pattern.replace('\'', "''");
                 format!("{base_sql} WHERE name LIKE '{escaped_pattern}'")
             }
-            _ => return Err(DataFusionError::Plan(
-                "SHOW VARIABLES only supports LIKE filters".to_string(),
-            )),
+            _ => {
+                return Err(DataFusionError::Plan(
+                    "SHOW VARIABLES only supports LIKE filters".to_string(),
+                ));
+            }
         };
         Ok(format!("{base_sql} ORDER BY NAME"))
     }

@@ -2601,6 +2601,7 @@ dependencies = [
  "datafusion",
  "deltalake",
  "deltalake-aws",
+ "dobbydb-common",
  "dobbydb-storage",
  "futures",
  "hive_metastore",
@@ -2612,6 +2613,13 @@ dependencies = [
  "toml",
  "url",
  "volo-thrift",
+]
+
+[[package]]
+name = "dobbydb-common"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
