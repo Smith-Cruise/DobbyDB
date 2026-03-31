@@ -8,6 +8,7 @@ use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use dobbydb_catalog::catalog::get_catalog_manager;
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
+use dobbydb_common::runtime::get_runtime_manager;
 
 pub struct DobbyDBServer {
     config_path: String,
@@ -45,8 +46,13 @@ struct DobbyDBArgs {
     command: Vec<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+
+pub fn main() -> Result<()> {
+    let cpu_handle = get_runtime_manager().read().unwrap().cpu_handle();
+    cpu_handle.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     let args = DobbyDBArgs::parse();
     let server = DobbyDBServer::new(args.config.clone());
     server.init().await?;
