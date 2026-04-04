@@ -1,0 +1,8 @@
+[package]
+name = "dobbydb-common"
+version = { workspace = true }
+edition = { workspace = true }
+
+
+[dependencies]
+tokio = { workspace = true }

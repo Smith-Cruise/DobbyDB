@@ -2601,6 +2601,7 @@ dependencies = [
  "datafusion",
  "deltalake",
  "deltalake-aws",
+ "dobbydb-common",
  "dobbydb-storage",
  "futures",
  "hive_metastore",
@@ -2615,6 +2616,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dobbydb-common"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "dobbydb-server"
 version = "0.1.0"
 dependencies = [
@@ -2622,6 +2630,7 @@ dependencies = [
  "datafusion",
  "datafusion-cli",
  "dobbydb-catalog",
+ "dobbydb-common",
  "dobbydb-sql",
  "futures",
  "rustyline",
@@ -2633,9 +2642,11 @@ name = "dobbydb-sql"
 version = "0.1.0"
 dependencies = [
  "datafusion",
+ "datafusion-cli",
  "dobbydb-catalog",
  "sqlparser",
  "tokio",
+ "url",
 ]
 
 [[package]]

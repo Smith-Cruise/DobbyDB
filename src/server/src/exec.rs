@@ -105,9 +105,8 @@ async fn exec_and_print(
     let now = Instant::now();
     let df = ctx.sql(sql).await?;
     let format_options = ctx.task_ctx().session_config().options().format.clone();
-
+    let mut stream = df.execute_stream().await?;
     if print_options.format == PrintFormat::Table {
-        let mut stream = df.execute_stream().await?;
         let schema = stream.schema();
         let mut row_count = 0_usize;
         let mut batches = Vec::new();
@@ -118,7 +117,6 @@ async fn exec_and_print(
         }
         print_options.print_batches(schema, &batches, now, row_count, &format_options)?;
     } else {
-        let stream = df.execute_stream().await?;
         print_options
             .print_stream(stream, now, &format_options)
             .await?;

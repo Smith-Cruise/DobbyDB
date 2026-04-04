@@ -2,10 +2,14 @@ mod exec;
 
 use clap::Parser;
 use datafusion::common::error::Result;
-use datafusion_cli::object_storage::instrumented::InstrumentedObjectStoreRegistry;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion_cli::object_storage::instrumented::{
+    InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
+};
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use dobbydb_catalog::catalog::get_catalog_manager;
+use dobbydb_common::runtime::get_runtime_manager;
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
 
@@ -33,8 +37,15 @@ impl DobbyDBServer {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct DobbyDBArgs {
-    #[arg(short, long)]
+    #[clap(long, help = "Specify config path")]
     config: String,
+
+    #[clap(
+        long,
+        help = "Specify the default object_store_profiling mode, defaults to 'disabled'.\n[possible values: disabled, summary, trace]",
+        default_value_t = InstrumentedObjectStoreMode::Disabled
+    )]
+    object_store_profiling: InstrumentedObjectStoreMode,
 
     #[clap(
         long,
@@ -45,20 +56,31 @@ struct DobbyDBArgs {
     command: Vec<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+pub fn main() -> Result<()> {
+    let cpu_handle = get_runtime_manager().read().unwrap().cpu_handle();
+    cpu_handle.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     let args = DobbyDBArgs::parse();
     let server = DobbyDBServer::new(args.config.clone());
     server.init().await?;
+
+    let instrumented_registry = Arc::new(
+        InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
+    );
+    let runtime_env = RuntimeEnvBuilder::new()
+        .with_object_store_registry(instrumented_registry.clone())
+        .build_arc()?;
 
     let print_options = PrintOptions {
         format: PrintFormat::Table,
         quiet: false,
         maxrows: MaxRows::Unlimited,
         color: true,
-        instrumented_registry: Arc::new(InstrumentedObjectStoreRegistry::default()),
+        instrumented_registry: instrumented_registry.clone(),
     };
-    let session_context = ExtendedSessionContext::new().await?;
+    let session_context = ExtendedSessionContext::new_with_runtime_env(runtime_env).await?;
     let commands = args.command;
     if commands.is_empty() {
         exec::exec_from_repl(&session_context, &print_options).await;
