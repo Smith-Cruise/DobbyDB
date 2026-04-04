@@ -37,10 +37,7 @@ impl DobbyDBServer {
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct DobbyDBArgs {
-    #[clap(
-        long,
-        help = "Specify config path",
-    )]
+    #[clap(long, help = "Specify config path")]
     config: String,
 
     #[clap(
@@ -70,8 +67,7 @@ async fn async_main() -> Result<()> {
     server.init().await?;
 
     let instrumented_registry = Arc::new(
-        InstrumentedObjectStoreRegistry::new()
-            .with_profile_mode(args.object_store_profiling),
+        InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
     let runtime_env = RuntimeEnvBuilder::new()
         .with_object_store_registry(instrumented_registry.clone())

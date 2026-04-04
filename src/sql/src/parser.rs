@@ -1,4 +1,4 @@
-use crate::statements::{ExtendedStatement, ShowVariablesStatement};
+use crate::statements::{ExtendedStatement, ShowCatalogsStatement, ShowVariablesStatement};
 use datafusion::common::Result;
 use datafusion::common::{Diagnostic, Span};
 use datafusion::config::SqlParserOptions;
@@ -156,7 +156,7 @@ impl<'a> ExtendedParser<'a> {
         if let Token::Word(w) = &token.token {
             if w.value.eq_ignore_ascii_case("catalogs") {
                 self.parser.advance_token();
-                return Ok(ExtendedStatement::ShowCatalogsStatement);
+                return self.parse_show_catalogs();
             }
 
             if w.keyword == Keyword::VARIABLES {
@@ -169,21 +169,33 @@ impl<'a> ExtendedParser<'a> {
         )))
     }
 
+    fn parse_show_catalogs(&mut self) -> Result<ExtendedStatement> {
+        Ok(ExtendedStatement::ShowCatalogsStatement(Box::new(
+            ShowCatalogsStatement {
+                filter: self.parse_show_like_filter()?,
+            },
+        )))
+    }
+
     fn parse_show_variables(&mut self) -> Result<ExtendedStatement> {
         let verbose = self.parser.parse_keyword(Keyword::VERBOSE);
-        let filter = if self.parser.parse_keyword(Keyword::LIKE) {
-            Some(ShowStatementFilter::Like(
-                self.parser
-                    .parse_literal_string()
-                    .map_err(DataFusionError::from)?,
-            ))
-        } else {
-            None
-        };
+        let filter = self.parse_show_like_filter()?;
 
         Ok(ExtendedStatement::ShowVariablesStatement(Box::new(
             ShowVariablesStatement { filter, verbose },
         )))
+    }
+
+    fn parse_show_like_filter(&mut self) -> Result<Option<ShowStatementFilter>> {
+        if self.parser.parse_keyword(Keyword::LIKE) {
+            Ok(Some(ShowStatementFilter::Like(
+                self.parser
+                    .parse_literal_string()
+                    .map_err(DataFusionError::from)?,
+            )))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Helper method to parse a statement and handle errors consistently, especially for recursion limits
@@ -207,15 +219,36 @@ impl<'a> ExtendedParser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::statements::ExtendedStatement::{SQLStatement, ShowVariablesStatement as ShowVars};
-    use crate::statements::ShowVariablesStatement;
-    use sqlparser::ast::{Ident, ObjectName, ObjectNamePart, ShowStatementOptions, Statement, Use};
+    use crate::statements::ExtendedStatement::{
+        SQLStatement, ShowCatalogsStatement as ShowCatalogs, ShowVariablesStatement as ShowVars,
+    };
+    use crate::statements::{ShowCatalogsStatement, ShowVariablesStatement};
+    use sqlparser::ast::{
+        Ident, ObjectName, ObjectNamePart, ShowStatementFilter, ShowStatementFilterPosition,
+        ShowStatementOptions, Statement, Use,
+    };
 
     #[test]
     fn test_show_catalogs() -> Result<()> {
         let statement = ExtendedParser::parse_sql("show catalogs")?;
         let stmt = &statement[0];
-        assert_eq!(ExtendedStatement::ShowCatalogsStatement, *stmt);
+        assert_eq!(
+            ShowCatalogs(Box::new(ShowCatalogsStatement { filter: None })),
+            *stmt
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_catalogs_like() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show catalogs like '%foo%'")?;
+        let stmt = &statement[0];
+        assert_eq!(
+            ShowCatalogs(Box::new(ShowCatalogsStatement {
+                filter: Some(ShowStatementFilter::Like("%foo%".to_string())),
+            })),
+            *stmt
+        );
         Ok(())
     }
 
@@ -245,6 +278,51 @@ mod tests {
                 limit: None,
                 limit_from: None,
                 filter_position: None,
+            },
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_schemas_like() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show schemas like '%foo%'")?;
+        let stmt = &statement[0];
+        let expected_statement = SQLStatement(Box::new(Statement::ShowSchemas {
+            terse: false,
+            history: false,
+            show_options: ShowStatementOptions {
+                show_in: None,
+                starts_with: None,
+                limit: None,
+                limit_from: None,
+                filter_position: Some(ShowStatementFilterPosition::Suffix(
+                    ShowStatementFilter::Like("%foo%".to_string()),
+                )),
+            },
+        }));
+        assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_tables_like() -> Result<()> {
+        let statement = ExtendedParser::parse_sql("show tables like '%foo%'")?;
+        let stmt = &statement[0];
+        let expected_statement = SQLStatement(Box::new(Statement::ShowTables {
+            terse: false,
+            history: false,
+            extended: false,
+            full: false,
+            external: false,
+            show_options: ShowStatementOptions {
+                show_in: None,
+                starts_with: None,
+                limit: None,
+                limit_from: None,
+                filter_position: Some(ShowStatementFilterPosition::Suffix(
+                    ShowStatementFilter::Like("%foo%".to_string()),
+                )),
             },
         }));
         assert_eq!(expected_statement, *stmt);

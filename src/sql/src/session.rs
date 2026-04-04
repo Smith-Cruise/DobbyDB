@@ -1,15 +1,16 @@
 use crate::parser::ExtendedParser;
-use crate::statements::ExtendedStatement;
+use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::common::Result;
-use datafusion::common::TableReference;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::LogicalPlanBuilder;
-use datafusion::logical_expr::sqlparser::ast::{ShowStatementFilter, Statement, Use};
+use datafusion::logical_expr::sqlparser::ast::{
+    ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
+};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider};
 use dobbydb_catalog::internal_catalog::{
@@ -60,45 +61,6 @@ impl SessionManager {
     }
 }
 
-struct ScanVirtualTableSqlBuilder {
-    catalog_name: String,
-    schema_name: String,
-    table_name: String,
-}
-
-impl ScanVirtualTableSqlBuilder {
-    fn new_with_table_reference(table_reference: TableReference) -> ScanVirtualTableSqlBuilder {
-        match table_reference {
-            TableReference::Bare { table } => Self {
-                catalog_name: String::from(INTERNAL_CATALOG),
-                schema_name: String::from(INFORMATION_SCHEMA),
-                table_name: String::from(table.as_ref()),
-            },
-            TableReference::Partial { schema, table } => Self {
-                catalog_name: String::from(INTERNAL_CATALOG),
-                schema_name: String::from(schema.as_ref()),
-                table_name: String::from(table.as_ref()),
-            },
-            TableReference::Full {
-                catalog,
-                schema,
-                table,
-            } => Self {
-                catalog_name: String::from(catalog.as_ref()),
-                schema_name: String::from(schema.as_ref()),
-                table_name: String::from(table.as_ref()),
-            },
-        }
-    }
-
-    fn build_sql(&self) -> String {
-        format!(
-            "SELECT * FROM {}.{}.{}",
-            self.catalog_name, self.schema_name, self.table_name
-        )
-    }
-}
-
 pub struct ExtendedSessionContext {
     session_context: SessionContext,
 }
@@ -142,58 +104,28 @@ impl ExtendedSessionContext {
     }
 
     pub async fn create_dataframe(&self, statement: &ExtendedStatement) -> Result<DataFrame> {
-        let sql_string: Option<String>;
-        match statement {
-            ExtendedStatement::ShowCatalogsStatement => {
-                sql_string = Some(
-                    ScanVirtualTableSqlBuilder::new_with_table_reference(TableReference::Bare {
-                        table: Arc::from(INFORMATION_SCHEMA_SHOW_CATALOGS),
-                    })
-                    .build_sql(),
-                );
+        let sql_string: String = match statement {
+            ExtendedStatement::ShowCatalogsStatement(show_catalogs) => {
+                self.build_show_catalogs_sql(show_catalogs)?
             }
             ExtendedStatement::ShowVariablesStatement(show_variables) => {
-                sql_string = Some(
-                    self.build_show_variables_sql(&show_variables.filter, show_variables.verbose)?,
-                );
+                self.build_show_variables_sql(&show_variables.filter, show_variables.verbose)?
             }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
                     return self.handle_use_stmt(use_stmt).await;
                 }
-                Statement::ShowSchemas { .. } => {
-                    sql_string = Some(
-                        ScanVirtualTableSqlBuilder::new_with_table_reference(
-                            TableReference::Bare {
-                                table: Arc::from(INFORMATION_SCHEMA_SHOW_SCHEMAS),
-                            },
-                        )
-                        .build_sql(),
-                    );
+                Statement::ShowSchemas { show_options, .. } => {
+                    self.build_show_schemas_sql(show_options)?
                 }
-                Statement::ShowTables { .. } => {
-                    sql_string = Some(
-                        ScanVirtualTableSqlBuilder::new_with_table_reference(
-                            TableReference::Bare {
-                                table: Arc::from(INFORMATION_SCHEMA_SHOW_TABLES),
-                            },
-                        )
-                        .build_sql(),
-                    );
+                Statement::ShowTables { show_options, .. } => {
+                    self.build_show_tables_sql(show_options)?
                 }
-                _ => {
-                    sql_string = Some(stmt.to_string());
-                }
+                _ => stmt.to_string(),
             },
-        }
+        };
 
-        if let Some(sql) = sql_string {
-            self.session_context.sql(&sql).await
-        } else {
-            Err(DataFusionError::Plan(String::from(
-                "failed to create logical plan",
-            )))
-        }
+        self.session_context.sql(&sql_string).await
     }
 
     pub fn task_ctx(&self) -> Arc<TaskContext> {
@@ -222,8 +154,10 @@ impl ExtendedSessionContext {
         let base_sql = match filter {
             None => base_sql,
             Some(ShowStatementFilter::Like(pattern)) => {
-                let escaped_pattern = pattern.replace('\'', "''");
-                format!("{base_sql} WHERE name LIKE '{escaped_pattern}'")
+                format!(
+                    "{base_sql} WHERE name LIKE '{}'",
+                    Self::escape_sql_string(pattern)
+                )
             }
             _ => {
                 return Err(DataFusionError::Plan(
@@ -232,6 +166,72 @@ impl ExtendedSessionContext {
             }
         };
         Ok(format!("{base_sql} ORDER BY NAME"))
+    }
+
+    fn build_show_catalogs_sql(&self, show_catalogs: &ShowCatalogsStatement) -> Result<String> {
+        self.build_filtered_virtual_table_sql(
+            INFORMATION_SCHEMA_SHOW_CATALOGS,
+            "catalog_name",
+            &show_catalogs.filter,
+        )
+    }
+
+    fn build_show_schemas_sql(&self, show_options: &ShowStatementOptions) -> Result<String> {
+        self.build_filtered_virtual_table_sql(
+            INFORMATION_SCHEMA_SHOW_SCHEMAS,
+            "schema_name",
+            &Self::show_like_filter(show_options),
+        )
+    }
+
+    fn build_show_tables_sql(&self, show_options: &ShowStatementOptions) -> Result<String> {
+        self.build_filtered_virtual_table_sql(
+            INFORMATION_SCHEMA_SHOW_TABLES,
+            "table_name",
+            &Self::show_like_filter(show_options),
+        )
+    }
+
+    fn show_like_filter(show_options: &ShowStatementOptions) -> Option<ShowStatementFilter> {
+        match &show_options.filter_position {
+            None => None,
+            Some(ShowStatementFilterPosition::Infix(filter))
+            | Some(ShowStatementFilterPosition::Suffix(filter)) => match filter {
+                ShowStatementFilter::Like(pattern) => {
+                    Some(ShowStatementFilter::Like(pattern.clone()))
+                }
+                _ => None,
+            },
+        }
+    }
+
+    fn build_filtered_virtual_table_sql(
+        &self,
+        table_name: &str,
+        column_name: &str,
+        filter: &Option<ShowStatementFilter>,
+    ) -> Result<String> {
+        let base_sql = format!(
+            "SELECT * FROM {}.{}.{}",
+            INTERNAL_CATALOG, INFORMATION_SCHEMA, table_name
+        );
+
+        let base_sql = match filter {
+            None => base_sql,
+            Some(ShowStatementFilter::Like(pattern)) => {
+                format!(
+                    "{base_sql} WHERE {column_name} LIKE '{}'",
+                    Self::escape_sql_string(pattern)
+                )
+            }
+            _ => base_sql,
+        };
+
+        Ok(format!("{base_sql} ORDER BY {column_name}"))
+    }
+
+    fn escape_sql_string(value: &str) -> String {
+        value.replace('\'', "''")
     }
 
     async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame> {
@@ -316,17 +316,16 @@ impl ExtendedSessionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::common::assert_contains;
     use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+    use datafusion::object_store::memory::InMemory;
+    use datafusion::object_store::path::Path;
+    use datafusion::object_store::{ObjectStore, PutPayload};
     use datafusion::prelude::CsvReadOptions;
     use datafusion_cli::object_storage::instrumented::{
         InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
     };
-    use object_store::memory::InMemory;
-    use object_store::path::Path;
-    use object_store::{ObjectStore, PutPayload};
     use std::sync::Arc;
     use url::Url;
 
@@ -395,6 +394,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_show_catalogs_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session.sql("show catalogs").await?.collect().await?;
+        let schema = batches[0].schema();
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.field(0).name(), "catalog_name");
+        assert_contains!(output.as_str(), "internal");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_catalogs_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show catalogs like '%tern%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "internal");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_schemas_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show schemas like '%formation%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "information_schema");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_tables_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::new().await?;
+        let batches = session
+            .sql("show tables like '%table%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+        println!("{}", output);
+
+        assert_contains!(output.as_str(), "tables");
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_like_sql_escapes_quotes() -> Result<()> {
+        let session_context = SessionContext::new();
+        let session = ExtendedSessionContext { session_context };
+        let sql = session.build_filtered_virtual_table_sql(
+            INFORMATION_SCHEMA_SHOW_CATALOGS,
+            "catalog_name",
+            &Some(ShowStatementFilter::Like("%o''hara%".to_string())),
+        )?;
+
+        assert_contains!(sql.as_str(), "LIKE '%o''''hara%'");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_instrumented_object_store_registry_records_requests() -> Result<()> {
         let instrumented_registry = Arc::new(
             InstrumentedObjectStoreRegistry::new()
@@ -410,7 +479,7 @@ mod tests {
         object_store
             .put(
                 &Path::from("data.csv"),
-                PutPayload::from(Bytes::from_static(b"id,value\n1,alpha\n2,beta\n")),
+                PutPayload::from_static(b"id,value\n1,alpha\n2,beta\n"),
             )
             .await
             .map_err(|err| DataFusionError::External(Box::new(err)))?;

@@ -2642,9 +2642,11 @@ name = "dobbydb-sql"
 version = "0.1.0"
 dependencies = [
  "datafusion",
+ "datafusion-cli",
  "dobbydb-catalog",
  "sqlparser",
  "tokio",
+ "url",
 ]
 
 [[package]]
