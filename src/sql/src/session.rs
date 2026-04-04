@@ -7,6 +7,7 @@ use datafusion::common::TableReference;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
+use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::logical_expr::sqlparser::ast::{ShowStatementFilter, Statement, Use};
 use datafusion::prelude::{SessionConfig, SessionContext};
@@ -104,9 +105,13 @@ pub struct ExtendedSessionContext {
 
 impl ExtendedSessionContext {
     pub async fn new() -> Result<Self> {
+        Self::new_with_runtime_env(Arc::new(RuntimeEnv::default())).await
+    }
+
+    pub async fn new_with_runtime_env(runtime_env: Arc<RuntimeEnv>) -> Result<Self> {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
-        let session_context = SessionContext::new_with_config(session_config);
+        let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
         let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
 
         let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
@@ -193,6 +198,10 @@ impl ExtendedSessionContext {
 
     pub fn task_ctx(&self) -> Arc<TaskContext> {
         self.session_context.task_ctx()
+    }
+
+    pub fn session_context(&self) -> &SessionContext {
+        &self.session_context
     }
 
     fn build_show_variables_sql(
@@ -307,8 +316,19 @@ impl ExtendedSessionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::common::assert_contains;
+    use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+    use datafusion::prelude::CsvReadOptions;
+    use datafusion_cli::object_storage::instrumented::{
+        InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
+    };
+    use object_store::memory::InMemory;
+    use object_store::path::Path;
+    use object_store::{ObjectStore, PutPayload};
+    use std::sync::Arc;
+    use url::Url;
 
     #[tokio::test]
     async fn test_show_variables_execution() -> Result<()> {
@@ -371,6 +391,53 @@ mod tests {
         assert_eq!(schema.fields().len(), 3);
         assert_eq!(schema.field(2).name(), "description");
         assert_contains!(output.as_str(), "datafusion.execution.target_partitions");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_instrumented_object_store_registry_records_requests() -> Result<()> {
+        let instrumented_registry = Arc::new(
+            InstrumentedObjectStoreRegistry::new()
+                .with_profile_mode(InstrumentedObjectStoreMode::Summary),
+        );
+        let runtime_env = RuntimeEnvBuilder::new()
+            .with_object_store_registry(instrumented_registry.clone())
+            .build_arc()?;
+        let session = ExtendedSessionContext::new_with_runtime_env(runtime_env).await?;
+
+        let store_url = Url::parse("memory://bucket").unwrap();
+        let object_store = Arc::new(InMemory::new());
+        object_store
+            .put(
+                &Path::from("data.csv"),
+                PutPayload::from(Bytes::from_static(b"id,value\n1,alpha\n2,beta\n")),
+            )
+            .await
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+        session
+            .session_context()
+            .register_object_store(&store_url, object_store);
+        session
+            .session_context()
+            .register_csv(
+                "instrumented_csv",
+                "memory://bucket/data.csv",
+                CsvReadOptions::default(),
+            )
+            .await?;
+
+        let batches = session
+            .sql("select count(*) as cnt from instrumented_csv")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "| 2   |");
+        assert!(!instrumented_registry.stores().is_empty());
+
+        let requests = instrumented_registry.stores()[0].take_requests();
+        assert!(!requests.is_empty());
         Ok(())
     }
 }

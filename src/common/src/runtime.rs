@@ -28,7 +28,10 @@ impl RuntimeManager {
                 .build()
                 .unwrap(),
         );
-        Self { cpu_runtime, io_runtime }
+        Self {
+            cpu_runtime,
+            io_runtime,
+        }
     }
 
     pub fn io_handle(&self) -> Handle {
