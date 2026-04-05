@@ -1,4 +1,7 @@
 use crate::catalog::CatalogConfig;
+use crate::table_format::TableFormat;
+use crate::table_format::hive::hive_partition::HivePartition;
+use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::table_provider_factory::{
     TableProviderBuilder, deduce_table_format, split_table_name,
 };
@@ -132,9 +135,9 @@ impl SchemaProvider for GlueSchema {
     }
 
     async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
-        let (table_name, _metadata_table_name) = split_table_name(tbl_name);
+        let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
-        if !self.table_exist(table_name) {
+        if !self.table_exist(tbl_name) {
             return Ok(None);
         }
 
@@ -167,6 +170,40 @@ impl SchemaProvider for GlueSchema {
         };
 
         let table_format = deduce_table_format(&glue_table_properties)?;
+        let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
+            let hive_storage_info = HiveStorageInfo::try_new_from_glue_table(&glue_table)?;
+            let hive_partitions = if !hive_storage_info
+                .table_schema
+                .table_partition_cols()
+                .is_empty()
+            {
+                // todo not checked
+                let paginator = glue_client
+                    .get_partitions()
+                    .database_name(&self.schema_name)
+                    .table_name(table_name)
+                    .into_paginator()
+                    .send();
+                tokio::pin!(paginator);
+
+                let mut partitions = Vec::new();
+                while let Some(page) = paginator.next().await {
+                    let page = page.map_err(|e| DataFusionError::External(Box::new(e)))?;
+                    partitions.extend(
+                        page.partitions()
+                            .iter()
+                            .map(HivePartition::try_new_from_glue_partition)
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                }
+                partitions
+            } else {
+                vec![]
+            };
+            (Some(hive_storage_info), Some(hive_partitions))
+        } else {
+            (None, None)
+        };
 
         let table_provider_builder = TableProviderBuilder::new(
             table_reference,
@@ -174,6 +211,10 @@ impl SchemaProvider for GlueSchema {
             table_format,
             CatalogConfig::GLUE(self.config.deref().clone()),
         );
+        let table_provider_builder = table_provider_builder
+            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()))
+            .with_hive_storage_info(hive_storage_info)
+            .with_hive_partitions(hive_partitions);
 
         Ok(Some(table_provider_builder.build().await?))
     }

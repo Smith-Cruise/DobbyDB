@@ -213,10 +213,9 @@ impl SchemaProvider for HMSSchema {
             CatalogConfig::HMS(self.config.deref().clone()),
         );
         let table_provider_builder = table_provider_builder
-            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()));
-        let table_provider_builder =
-            table_provider_builder.with_hive_storage_info(hive_storage_info);
-        let table_provider_builder = table_provider_builder.with_hive_partitions(hive_partitions);
+            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()))
+            .with_hive_storage_info(hive_storage_info)
+            .with_hive_partitions(hive_partitions);
         Ok(Some(table_provider_builder.build().await?))
     }
 
