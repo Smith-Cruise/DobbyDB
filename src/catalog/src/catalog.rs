@@ -1,6 +1,6 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
-use datafusion::catalog::CatalogProviderList;
+use datafusion::catalog::{AsyncCatalogProvider, AsyncCatalogProviderList, CatalogProviderList};
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use deltalake::logstore::{logstore_factories, object_store_factories};
@@ -9,7 +9,9 @@ use deltalake_aws::storage::S3ObjectStoreFactory;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
+use async_trait::async_trait;
 use url::Url;
+use crate::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
 
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {
@@ -117,6 +119,38 @@ fn register_something() {
             let url = Url::parse(&format!("{scheme}://")).unwrap();
             object_store_factories().insert(url.clone(), object_stores.clone());
             logstore_factories().insert(url.clone(), log_stores.clone());
+        }
+    }
+}
+
+pub struct DobbyDbCatalogProviderList {
+}
+
+impl DobbyDbCatalogProviderList {
+    pub fn new() -> DobbyDbCatalogProviderList {
+        Self {}
+    }
+}
+
+#[async_trait]
+impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
+    async fn catalog(&self, catalog_name: &str) -> Result<Option<Arc<dyn AsyncCatalogProvider>>> {
+        if catalog_name == INTERNAL_CATALOG {
+            return Ok(Some(Arc::new(InternalCatalog::new())))
+        }
+        let catalog_manager = get_catalog_manager().read().unwrap();
+        let catalog = if let Some(catalog) = catalog_manager.get_catalog(catalog_name) {
+            catalog.clone()
+        } else {
+            return Ok(None);
+        };
+        match catalog {
+            CatalogConfig::HMS(hms_catalog) => {
+                Ok(Some(Arc::new(HMSCatalog::new(&Arc::new(hms_catalog)))))
+            }
+            CatalogConfig::GLUE(_) => {
+                todo!()
+            }
         }
     }
 }

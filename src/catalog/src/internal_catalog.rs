@@ -3,9 +3,7 @@ use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
-use datafusion::catalog::{
-    CatalogProvider, CatalogProviderList, MemorySchemaProvider, SchemaProvider,
-};
+use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, CatalogProvider, CatalogProviderList, MemorySchemaProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::config::ConfigEntry;
 use datafusion::error::DataFusionError;
@@ -14,6 +12,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
 use std::any::Any;
 use std::sync::Arc;
+use async_trait::async_trait;
 
 pub const INTERNAL_CATALOG: &str = "internal";
 pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
@@ -21,12 +20,21 @@ pub const INFORMATION_SCHEMA_SHOW_SCHEMAS: &str = "schemas";
 pub const INFORMATION_SCHEMA_SHOW_TABLES: &str = "tables";
 pub const INFORMATION_SCHEMA_SHOW_VARIABLES: &str = "variables";
 
+pub fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<Arc<StreamingTable>> {
+    Ok(Arc::new(StreamingTable::try_new(table.schema().clone(), vec![table])?))
+}
+
 #[derive(Debug)]
 pub struct InternalCatalog {
     information_schema: Arc<dyn SchemaProvider>,
 }
 
 impl InternalCatalog {
+    pub fn new() -> Self {
+        Self {
+            information_schema: Arc::new(MemorySchemaProvider::new())
+        }
+    }
     pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self> {
         let information_schema = Arc::new(MemorySchemaProvider::new());
 
@@ -34,7 +42,7 @@ impl InternalCatalog {
         information_schema.register_table(
             INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
             Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowCatalogs::new(catalog_provider_list.clone()),
+                InformationSchemaShowCatalogs::new(),
             ))?),
         )?;
 
@@ -87,14 +95,53 @@ impl CatalogProvider for InternalCatalog {
     }
 }
 
+#[async_trait]
+impl AsyncCatalogProvider for InternalCatalog {
+    async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
+        if schema_name == INFORMATION_SCHEMA {
+            Ok(Some(Arc::new(InformationSchema::new())))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+struct InformationSchema {
+
+}
+
+impl InformationSchema {
+    pub fn new() -> Self {
+        Self {
+
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncSchemaProvider for InformationSchema {
+    async fn table(&self, table_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
+        if table_name == INFORMATION_SCHEMA_SHOW_CATALOGS {
+            Ok(Some(wrap_with_stream_table(Arc::new(InformationSchemaShowCatalogs::new()))?))
+        } else if table_name == INFORMATION_SCHEMA_SHOW_SCHEMAS {
+            todo!()
+        } else if table_name == INFORMATION_SCHEMA_SHOW_TABLES {
+            todo!()
+        } else if table_name == INFORMATION_SCHEMA_SHOW_VARIABLES {
+            todo!()
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct InformationSchemaShowCatalogs {
-    catalog_provider_list: Arc<dyn CatalogProviderList>,
     schema: SchemaRef,
 }
 
 impl InformationSchemaShowCatalogs {
-    pub fn new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Self {
+    pub fn new() -> Self {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("catalog_name", DataType::Utf8, false),
             Field::new("catalog_type", DataType::Utf8, false),
@@ -102,7 +149,6 @@ impl InformationSchemaShowCatalogs {
         ]));
 
         InformationSchemaShowCatalogs {
-            catalog_provider_list,
             schema,
         }
     }
@@ -119,27 +165,14 @@ impl PartitionStream for InformationSchemaShowCatalogs {
         let mut catalog_configs_builder = StringBuilder::new();
 
         let catalog_manager = get_catalog_manager().read().unwrap();
-        let all_catalog_names = self.catalog_provider_list.catalog_names();
-        for catalog_name in &all_catalog_names {
+        let all_catalogs = catalog_manager.get_all_catalogs();
+        for (catalog_name, catalog_config) in &all_catalogs {
             catalog_name_builder.append_value(catalog_name);
             if catalog_name == INTERNAL_CATALOG {
                 catalog_type_builder.append_value("INTERNAL");
                 catalog_configs_builder.append_null();
                 continue;
             }
-
-            let catalog_config = catalog_manager.get_catalog(catalog_name);
-            let catalog_config = match catalog_config {
-                Some(config) => config,
-                None => {
-                    let error =
-                        DataFusionError::Internal(format!("catalog {} not found", catalog_name));
-                    return Box::pin(RecordBatchStreamAdapter::new(
-                        Arc::clone(&self.schema),
-                        futures::stream::once(async move { Err(error) }),
-                    ));
-                }
-            };
 
             match catalog_config {
                 CatalogConfig::HMS(hms_catalog) => {

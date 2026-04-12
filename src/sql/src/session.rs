@@ -1,7 +1,7 @@
 use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::{CatalogProviderList, MemoryCatalogProviderList};
+use datafusion::catalog::{AsyncCatalogProviderList, CatalogProviderList, MemoryCatalogProviderList};
 use datafusion::common::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
@@ -12,7 +12,7 @@ use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider};
+use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider, DobbyDbCatalogProviderList};
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
     INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
@@ -77,8 +77,7 @@ impl ExtendedSessionContext {
         let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
 
         let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
-        register_catalogs_into_catalog_provider(memory_catalog_provider_list.clone(), all_catalogs)
-            .await?;
+        // register_catalogs_into_catalog_provider(memory_catalog_provider_list.clone(), all_catalogs) .await?;
 
         // load internal catalog
         memory_catalog_provider_list.register_catalog(
@@ -125,7 +124,26 @@ impl ExtendedSessionContext {
             },
         };
 
-        self.session_context.sql(&sql_string).await
+        // Instead, to use a remote catalog, we must use lower level APIs on
+        // SessionState (what `SessionContext::sql` does internally).
+        let state = self.session_context.state();
+        // First, parse the SQL (but don't plan it / resolve any table references)
+        let dialect = state.config().options().sql_parser.dialect;
+        let statement = state.sql_to_statement(&sql_string, &dialect)?;
+        // Find all `TableReferences` in the parsed queries. These correspond to the
+        // tables referred to by the query (in this case
+        // `remote_schema.remote_table`)
+        let references = state.resolve_table_references(&statement)?;
+        // Now we can asynchronously resolve the table references to get a cached catalog
+        // that we can use for our query
+        let catalog_provider_list = DobbyDbCatalogProviderList::new();
+        let resolved_catalog_providers = catalog_provider_list.resolve(&references, state.config()).await?;
+        let new_ctx = self.session_context.clone();
+        new_ctx.register_catalog_list(resolved_catalog_providers);
+        new_ctx.sql(&sql_string).await
+
+
+        // self.session_context.sql(&sql_string).await
     }
 
     pub fn task_ctx(&self) -> Arc<TaskContext> {

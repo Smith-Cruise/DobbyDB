@@ -6,7 +6,7 @@ use crate::table_format::table_provider_factory::{
     TableProviderBuilder, deduce_table_format, split_table_name,
 };
 use async_trait::async_trait;
-use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
+use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, CatalogProvider, SchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
@@ -67,6 +67,13 @@ pub struct HMSCatalog {
 }
 
 impl HMSCatalog {
+    pub fn new(config: &Arc<HMSCatalogConfig>) -> Self {
+        Self {
+            _config: config.clone(),
+            schemas: HashMap::new(),
+        }
+    }
+    
     pub async fn try_new(config: &Arc<HMSCatalogConfig>) -> Result<Self> {
         let hms_client = build_hms_client(config)?;
         let all_database_names = hms_client
@@ -102,6 +109,13 @@ impl CatalogProvider for HMSCatalog {
     }
 }
 
+#[async_trait]
+impl AsyncCatalogProvider for HMSCatalog {
+    async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
+        Ok(Some(Arc::new(HMSSchema::new(&self._config, schema_name)?)))
+    }
+}
+
 #[derive(Debug)]
 struct HMSSchema {
     config: Arc<HMSCatalogConfig>,
@@ -110,6 +124,15 @@ struct HMSSchema {
 }
 
 impl HMSSchema {
+    pub fn new(config: &Arc<HMSCatalogConfig>,
+               schema_name: &str) -> Result<Self> {
+        Ok(Self {
+            config: config.clone(),
+            schema_name: schema_name.to_string(),
+            table_names: HashSet::new(),
+        })
+    }
+
     pub async fn try_new(
         hms_client: &ThriftHiveMetastoreClient,
         config: &Arc<HMSCatalogConfig>,
@@ -221,5 +244,79 @@ impl SchemaProvider for HMSSchema {
 
     fn table_exist(&self, name: &str) -> bool {
         self.table_names.contains(name)
+    }
+}
+
+#[async_trait]
+impl AsyncSchemaProvider for HMSSchema {
+    async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
+        let (table_name, metadata_table_name) = split_table_name(tbl_name);
+
+        let hms_client = build_hms_client(&self.config)?;
+        let get_table_request = GetTableRequest {
+            db_name: self.schema_name.clone().into(),
+            tbl_name: table_name.to_string().into(),
+            capabilities: None,
+        };
+        let hms_table = hms_client
+            .get_table_req(get_table_request)
+            .await
+            .map(from_thrift_exception)
+            .map_err(|e| DataFusionError::External(e.into()))??
+            .table;
+
+        let table_reference = TableReference::full(
+            self.config.name.as_str(),
+            self.schema_name.as_str(),
+            table_name,
+        );
+
+        let mut hms_table_properties: HashMap<String, String> = HashMap::new();
+        if let Some(parameters) = &hms_table.parameters {
+            for (k, v) in parameters {
+                hms_table_properties.insert(k.to_string(), v.to_string());
+            }
+        }
+
+        let table_format = deduce_table_format(&hms_table_properties)?;
+        let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
+            let hive_storage_info = HiveStorageInfo::try_new_from_hms_table(&hms_table)?;
+            let hive_partitions = if !hive_storage_info
+                .table_schema
+                .table_partition_cols()
+                .is_empty()
+            {
+                let partitions = hms_client
+                    .get_partitions(
+                        self.schema_name.clone().into(),
+                        table_name.to_string().into(),
+                        i16::MAX,
+                    )
+                    .await
+                    .map(from_thrift_exception)
+                    .map_err(|e| DataFusionError::External(e.into()))??;
+                partitions
+                    .iter()
+                    .map(HivePartition::try_new_from_hms_partition)
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                vec![]
+            };
+            (Some(hive_storage_info), Some(hive_partitions))
+        } else {
+            (None, None)
+        };
+
+        let table_provider_builder = TableProviderBuilder::new(
+            table_reference,
+            hms_table_properties,
+            table_format,
+            CatalogConfig::HMS(self.config.deref().clone()),
+        );
+        let table_provider_builder = table_provider_builder
+            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()))
+            .with_hive_storage_info(hive_storage_info)
+            .with_hive_partitions(hive_partitions);
+        Ok(Some(table_provider_builder.build().await?))
     }
 }
