@@ -14,6 +14,9 @@ use iceberg::io::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use deltalake::aws::S3LogStoreFactory;
+use deltalake::aws::storage::S3ObjectStoreFactory;
+use deltalake::logstore::{logstore_factories, object_store_factories};
 use url::Url;
 
 pub trait StorageTrait {

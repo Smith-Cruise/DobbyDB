@@ -1,17 +1,13 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
+use crate::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
+use async_trait::async_trait;
 use datafusion::catalog::{AsyncCatalogProvider, AsyncCatalogProviderList, CatalogProviderList};
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
-use deltalake::logstore::{logstore_factories, object_store_factories};
-use deltalake_aws::S3LogStoreFactory;
-use deltalake_aws::storage::S3ObjectStoreFactory;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
-use async_trait::async_trait;
-use url::Url;
-use crate::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
 
 #[derive(Serialize, Deserialize)]
 struct CatalogConfigs {
@@ -21,23 +17,31 @@ struct CatalogConfigs {
 
 #[derive(Debug, Clone)]
 pub enum CatalogConfig {
+    Internal,
     HMS(HMSCatalogConfig),
     GLUE(GlueCatalogConfig),
 }
 
-static CATALOG_MANAGER: OnceLock<RwLock<CatalogManager>> = OnceLock::new();
+// static CATALOG_MANAGER: OnceLock<RwLock<CatalogManager>> = OnceLock::new();
+//
+// pub fn get_catalog_manager() -> &'static RwLock<CatalogManager> {
+//     CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::default()))
+// }
 
-pub fn get_catalog_manager() -> &'static RwLock<CatalogManager> {
-    CATALOG_MANAGER.get_or_init(|| RwLock::new(CatalogManager::default()))
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CatalogManager {
     catalogs: HashMap<String, CatalogConfig>,
 }
 
 impl CatalogManager {
-    fn register_catalog(
+    pub fn new() -> Self {
+        let mut catalogs = HashMap::new();
+        catalogs.insert(INTERNAL_CATALOG.to_string(), CatalogConfig::Internal);
+        Self {
+            catalogs
+        }
+    }
+    fn add_catalog(
         &mut self,
         catalog_name: &str,
         catalog_config: CatalogConfig,
@@ -62,20 +66,18 @@ impl CatalogManager {
 
         if let Some(catalogs) = configs.hms {
             for hms_catalog in catalogs {
-                self.register_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
+                self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
             }
         }
 
         if let Some(catalogs) = configs.glue {
             for glue_catalog in catalogs {
-                self.register_catalog(
+                self.add_catalog(
                     &glue_catalog.name,
                     CatalogConfig::GLUE(glue_catalog.clone()),
                 )?;
             }
         }
-
-        register_something();
         Ok(())
     }
 
@@ -83,7 +85,7 @@ impl CatalogManager {
         self.catalogs.get(catalog_name)
     }
 
-    pub fn get_all_catalogs(&self) -> Vec<(String, CatalogConfig)> {
+    pub fn list_catalogs(&self) -> Vec<(String, CatalogConfig)> {
         self.catalogs
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -91,37 +93,24 @@ impl CatalogManager {
     }
 }
 
-pub async fn register_catalogs_into_catalog_provider(
-    catalog_provider: Arc<dyn CatalogProviderList>,
-    catalogs: Vec<(String, CatalogConfig)>,
-) -> Result<()> {
-    for (key, value) in catalogs {
-        match value {
-            CatalogConfig::HMS(config) => {
-                let hms_catalog = HMSCatalog::try_new(&Arc::new(config)).await?;
-                catalog_provider.register_catalog(key, Arc::new(hms_catalog));
-            }
-            CatalogConfig::GLUE(config) => {
-                let glue_catalog = GlueCatalog::try_new(&Arc::new(config)).await?;
-                catalog_provider.register_catalog(key, Arc::new(glue_catalog));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn register_something() {
-    {
-        // register delta
-        let object_stores = Arc::new(S3ObjectStoreFactory::default());
-        let log_stores = Arc::new(S3LogStoreFactory::default());
-        for scheme in ["s3", "s3a", "oss"].iter() {
-            let url = Url::parse(&format!("{scheme}://")).unwrap();
-            object_store_factories().insert(url.clone(), object_stores.clone());
-            logstore_factories().insert(url.clone(), log_stores.clone());
-        }
-    }
-}
+// pub async fn register_catalogs_into_catalog_provider(
+//     catalog_provider: Arc<dyn CatalogProviderList>,
+//     catalogs: Vec<(String, CatalogConfig)>,
+// ) -> Result<()> {
+//     for (key, value) in catalogs {
+//         match value {
+//             CatalogConfig::HMS(config) => {
+//                 let hms_catalog = HMSCatalog::try_new(&Arc::new(config)).await?;
+//                 catalog_provider.register_catalog(key, Arc::new(hms_catalog));
+//             }
+//             CatalogConfig::GLUE(config) => {
+//                 let glue_catalog = GlueCatalog::try_new(&Arc::new(config)).await?;
+//                 catalog_provider.register_catalog(key, Arc::new(glue_catalog));
+//             }
+//         }
+//     }
+//     Ok(())
+// }
 
 pub struct DobbyDbCatalogProviderList {
 }
@@ -153,4 +142,11 @@ impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
             }
         }
     }
+}
+
+#[async_trait]
+pub trait DobbyDbCatalogProvider {
+    async fn list_schemas(&self) -> Result<Vec<String>>;
+
+    async fn list_tables(&self, schema_name: &str) -> Result<Vec<String>>;
 }

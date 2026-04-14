@@ -1,4 +1,4 @@
-use crate::catalog::CatalogConfig;
+use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
@@ -92,6 +92,29 @@ impl HMSCatalog {
             _config: config.clone(),
             schemas,
         })
+    }
+}
+
+#[async_trait]
+impl DobbyDbCatalogProvider for HMSCatalog {
+    async fn list_schemas(&self) -> Result<Vec<String>> {
+        let hms_client = build_hms_client(&self._config)?;
+        let all_database_names = hms_client
+            .get_all_databases()
+            .await
+            .map(from_thrift_exception)
+            .map_err(|e| DataFusionError::External(e.into()))??;
+        Ok(all_database_names.into_iter().map(|name| name.to_string()).collect())
+    }
+
+    async fn list_tables(&self, schema_name: &str) -> Result<Vec<String>> {
+        let hms_client = build_hms_client(&self._config)?;
+        let all_tables = hms_client
+            .get_all_tables(schema_name.to_string().into())
+            .await
+            .map(from_thrift_exception)
+            .map_err(|e| DataFusionError::External(e.into()))??;
+        Ok(all_tables.into_iter().map(|name| name.to_string()).collect())
     }
 }
 

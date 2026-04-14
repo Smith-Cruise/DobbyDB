@@ -9,7 +9,7 @@ pub struct RuntimeManager {
 }
 
 impl RuntimeManager {
-    fn new() -> Self {
+    pub fn default() -> Self {
         let cpu_num = std::thread::available_parallelism().unwrap().get();
         let cpu_runtime = Arc::new(
             Builder::new_multi_thread()
@@ -44,5 +44,5 @@ impl RuntimeManager {
 }
 
 pub fn get_runtime_manager() -> &'static RwLock<RuntimeManager> {
-    RUNTIME_MANAGER.get_or_init(|| RwLock::new(RuntimeManager::new()))
+    RUNTIME_MANAGER.get_or_init(|| RwLock::new(RuntimeManager::default()))
 }

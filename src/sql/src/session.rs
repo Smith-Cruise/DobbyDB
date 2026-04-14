@@ -66,8 +66,12 @@ pub struct ExtendedSessionContext {
 }
 
 impl ExtendedSessionContext {
-    pub async fn new() -> Result<Self> {
-        Self::new_with_runtime_env(Arc::new(RuntimeEnv::default())).await
+    // pub async fn new() -> Result<Self> {
+    //     Self::new_with_runtime_env(Arc::new(RuntimeEnv::default())).await
+    // }
+
+    pub async fn new(server: Arc<DobbyDbServer>) -> Result<Self> {
+
     }
 
     pub async fn new_with_runtime_env(runtime_env: Arc<RuntimeEnv>) -> Result<Self> {

@@ -8,30 +8,39 @@ use datafusion_cli::object_storage::instrumented::{
 };
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
-use dobbydb_catalog::catalog::get_catalog_manager;
-use dobbydb_common::runtime::get_runtime_manager;
+use dobbydb_catalog::catalog::{get_catalog_manager, CatalogManager};
+use dobbydb_common::runtime::{get_runtime_manager, RuntimeManager};
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
 
 pub struct DobbyDBServer {
-    config_path: String,
+    pub config_path: String,
+    pub catalog_manager: CatalogManager,
+    pub runtime_manager: RuntimeManager,
 }
 
 impl DobbyDBServer {
-    fn new(config_path: String) -> Self {
-        Self { config_path }
+    fn new(config_path: String) -> Result<Self> {
+        let mut catalog_manager = CatalogManager::new();
+        catalog_manager.load_config(&config_path)?;
+        let runtime_manager = RuntimeManager::default();
+        Ok(Self {
+            config_path,
+            catalog_manager,
+            runtime_manager
+        })
     }
 
-    pub async fn init(&self) -> Result<()> {
-        self.load_config()?;
-        Ok(())
-    }
-
-    fn load_config(&self) -> Result<()> {
-        let mut catalog_manager = get_catalog_manager().write().unwrap();
-        catalog_manager.load_config(&self.config_path)?;
-        Ok(())
-    }
+    // pub async fn init(&self) -> Result<()> {
+    //     self.load_config()?;
+    //     Ok(())
+    // }
+    //
+    // fn load_config(&self) -> Result<()> {
+    //     let mut catalog_manager = get_catalog_manager().write().unwrap();
+    //     catalog_manager.load_config(&self.config_path)?;
+    //     Ok(())
+    // }
 }
 
 #[derive(Parser, Debug)]
@@ -57,15 +66,13 @@ struct DobbyDBArgs {
 }
 
 pub fn main() -> Result<()> {
-    let cpu_handle = get_runtime_manager().read().unwrap().cpu_handle();
-    cpu_handle.block_on(async_main())
+    let args = DobbyDBArgs::parse();
+    let server = Arc::new(DobbyDBServer::new(args.config.clone())?);
+    let cpu_handle = server.runtime_manager.cpu_handle();
+    cpu_handle.block_on(async_main(server, args))
 }
 
-async fn async_main() -> Result<()> {
-    let args = DobbyDBArgs::parse();
-    let server = DobbyDBServer::new(args.config.clone());
-    server.init().await?;
-
+async fn async_main(server: Arc<DobbyDBServer>, args: DobbyDBArgs) -> Result<()> {
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
