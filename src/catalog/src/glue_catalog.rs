@@ -101,9 +101,10 @@ impl AsyncSchemaProvider for GlueSchema {
             .await
         {
             Ok(resp) => resp,
-            Err(err) if err
-                .as_service_error()
-                .is_some_and(|err| err.is_entity_not_found_exception()) =>
+            Err(err)
+                if err
+                    .as_service_error()
+                    .is_some_and(|err| err.is_entity_not_found_exception()) =>
             {
                 return Ok(None);
             }
@@ -215,5 +216,41 @@ impl DobbyDbCatalogProvider for GlueCatalog {
         }
 
         Ok(table_names)
+    }
+
+    async fn schema_exist(&self, schema_name: &str) -> Result<bool> {
+        let glue_client = build_glue_client(&self.config).await;
+        match glue_client.get_database().name(schema_name).send().await {
+            Ok(_) => Ok(true),
+            Err(err)
+                if err
+                    .as_service_error()
+                    .is_some_and(|err| err.is_entity_not_found_exception()) =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(DataFusionError::External(Box::new(err))),
+        }
+    }
+
+    async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool> {
+        let glue_client = build_glue_client(&self.config).await;
+        match glue_client
+            .get_table()
+            .database_name(schema_name)
+            .name(table_name)
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(err)
+                if err
+                    .as_service_error()
+                    .is_some_and(|err| err.is_entity_not_found_exception()) =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(DataFusionError::External(Box::new(err))),
+        }
     }
 }

@@ -1,18 +1,21 @@
 use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
+use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::table_provider_factory::{
-    deduce_table_format, split_table_name, TableProviderBuilder,
+    TableProviderBuilder, deduce_table_format, split_table_name,
 };
-use crate::table_format::TableFormat;
 use async_trait::async_trait;
-use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, SchemaProvider, TableProvider};
+use datafusion::catalog::{
+    AsyncCatalogProvider, AsyncSchemaProvider, SchemaProvider, TableProvider,
+};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use dobbydb_storage::storage::Storage;
 use hive_metastore::{
     GetTableRequest, ThriftHiveMetastoreClient, ThriftHiveMetastoreClientBuilder,
+    ThriftHiveMetastoreGetDatabaseException, ThriftHiveMetastoreGetTableReqException,
 };
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -73,7 +76,7 @@ impl HMSCatalog {
             // schemas: HashMap::new(),
         }
     }
-    
+
     // pub async fn try_new(config: &Arc<HMSCatalogConfig>) -> Result<Self> {
     //     let hms_client = build_hms_client(config)?;
     //     let all_database_names = hms_client
@@ -114,7 +117,10 @@ impl DobbyDbCatalogProvider for HMSCatalog {
             .await
             .map(from_thrift_exception)
             .map_err(|e| DataFusionError::External(e.into()))??;
-        Ok(all_database_names.into_iter().map(|name| name.to_string()).collect())
+        Ok(all_database_names
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect())
     }
 
     async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>> {
@@ -124,23 +130,49 @@ impl DobbyDbCatalogProvider for HMSCatalog {
             .await
             .map(from_thrift_exception)
             .map_err(|e| DataFusionError::External(e.into()))??;
-        Ok(all_tables.into_iter().map(|name| name.to_string()).collect())
+        Ok(all_tables
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect())
+    }
+
+    async fn schema_exist(&self, schema_name: &str) -> Result<bool> {
+        let hms_client = build_hms_client(&self.config)?;
+        match hms_client
+            .get_database(schema_name.to_string().into())
+            .await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+        {
+            MaybeException::Ok(_) => Ok(true),
+            MaybeException::Exception(ThriftHiveMetastoreGetDatabaseException::O1(_)) => Ok(false),
+            MaybeException::Exception(err) => Err(DataFusionError::Internal(format!(
+                "operation failed for hitting thrift error: {:?}",
+                err
+            ))),
+        }
+    }
+
+    async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool> {
+        let hms_client = build_hms_client(&self.config)?;
+        let get_table_request = GetTableRequest {
+            db_name: schema_name.to_string().into(),
+            tbl_name: table_name.to_string().into(),
+            capabilities: None,
+        };
+        match hms_client
+            .get_table_req(get_table_request)
+            .await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+        {
+            MaybeException::Ok(_) => Ok(true),
+            MaybeException::Exception(ThriftHiveMetastoreGetTableReqException::O2(_)) => Ok(false),
+            MaybeException::Exception(err) => Err(DataFusionError::Internal(format!(
+                "operation failed for hitting thrift error: {:?}",
+                err
+            ))),
+        }
     }
 }
-
-// impl CatalogProvider for HMSCatalog {
-//     fn as_any(&self) -> &dyn Any {
-//         self
-//     }
-//
-//     fn schema_names(&self) -> Vec<String> {
-//         self.schemas.keys().cloned().collect()
-//     }
-//
-//     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-//         self.schemas.get(name).cloned()
-//     }
-// }
 
 #[async_trait]
 impl AsyncCatalogProvider for HMSCatalog {
@@ -157,8 +189,7 @@ struct HMSSchema {
 }
 
 impl HMSSchema {
-    pub fn new(config: &Arc<HMSCatalogConfig>,
-               schema_name: &str) -> Result<Self> {
+    pub fn new(config: &Arc<HMSCatalogConfig>, schema_name: &str) -> Result<Self> {
         Ok(Self {
             config: config.clone(),
             schema_name: schema_name.to_string(),

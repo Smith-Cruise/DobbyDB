@@ -1,6 +1,6 @@
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
-use crate::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
+use crate::internal_catalog::{INTERNAL_CATALOG, InternalCatalog};
 use async_trait::async_trait;
 use datafusion::catalog::{AsyncCatalogProvider, AsyncCatalogProviderList};
 use datafusion::common::Result;
@@ -31,15 +31,9 @@ impl CatalogManager {
     pub fn new() -> Self {
         let mut catalogs = HashMap::new();
         catalogs.insert(INTERNAL_CATALOG.to_string(), CatalogConfig::Internal);
-        Self {
-            catalogs
-        }
+        Self { catalogs }
     }
-    fn add_catalog(
-        &mut self,
-        catalog_name: &str,
-        catalog_config: CatalogConfig,
-    ) -> Result<()> {
+    fn add_catalog(&mut self, catalog_name: &str, catalog_config: CatalogConfig) -> Result<()> {
         if self.catalogs.contains_key(catalog_name) {
             Err(DataFusionError::Configuration(format!(
                 "Catalog {} already exists",
@@ -88,30 +82,29 @@ impl CatalogManager {
 }
 
 pub struct DobbyDbCatalogProviderList {
-    catalog_manager: Arc<CatalogManager>
+    catalog_manager: Arc<CatalogManager>,
 }
 
 impl DobbyDbCatalogProviderList {
     pub fn new(catalog_manager: Arc<CatalogManager>) -> DobbyDbCatalogProviderList {
-        Self {
-            catalog_manager
-        }
+        Self { catalog_manager }
     }
 }
 
 #[async_trait]
 impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
     async fn catalog(&self, catalog_name: &str) -> Result<Option<Arc<dyn AsyncCatalogProvider>>> {
-        let catalog_config = if let Some(catalog_config) = self.catalog_manager.get_catalog(catalog_name) {
-            catalog_config.clone()
-        } else {
-            return Ok(None);
-        };
+        let catalog_config =
+            if let Some(catalog_config) = self.catalog_manager.get_catalog(catalog_name) {
+                catalog_config.clone()
+            } else {
+                return Ok(None);
+            };
 
         match catalog_config {
-            CatalogConfig::Internal => {
-                Ok(Some(Arc::new(InternalCatalog::new(self.catalog_manager.clone()))))
-            }
+            CatalogConfig::Internal => Ok(Some(Arc::new(InternalCatalog::new(
+                self.catalog_manager.clone(),
+            )))),
             CatalogConfig::HMS(hms_catalog) => {
                 Ok(Some(Arc::new(HMSCatalog::new(&Arc::new(hms_catalog)))))
             }
@@ -127,4 +120,8 @@ pub trait DobbyDbCatalogProvider {
     async fn list_schema_names(&self) -> Result<Vec<String>>;
 
     async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>>;
+
+    async fn schema_exist(&self, schema_name: &str) -> Result<bool>;
+
+    async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool>;
 }

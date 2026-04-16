@@ -69,35 +69,19 @@ pub struct ExtendedSessionContext {
 }
 
 impl ExtendedSessionContext {
-    // pub async fn new() -> Result<Self> {
-    //     Self::new_with_runtime_env(Arc::new(RuntimeEnv::default())).await
-    // }
-
-    pub async fn default() -> Result<Self> {
+    pub fn default() -> Result<Self> {
         let dobbydb_context = Arc::new(DobbyDbContext::default()?);
         let runtime_env = Arc::new(RuntimeEnv::default());
-        Self::new(dobbydb_context, runtime_env).await
+        Self::new(dobbydb_context, runtime_env)
     }
 
-    pub async fn new(
+    pub fn new(
         dobbydb_context: Arc<DobbyDbContext>,
         runtime_env: Arc<RuntimeEnv>,
     ) -> Result<Self> {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
-        // let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
-
-        // let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
-        // register_catalogs_into_catalog_provider(memory_catalog_provider_list.clone(), all_catalogs) .await?;
-
-        // // load internal catalog
-        // memory_catalog_provider_list.register_catalog(
-        //     INTERNAL_CATALOG.to_string(),
-        //     Arc::new(InternalCatalog::try_new(memory_catalog_provider_list.clone()).await?),
-        // );
-        //
-        // session_context.register_catalog_list(memory_catalog_provider_list);
         Ok(Self {
             session_context,
             dobbydb_context,
@@ -392,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session.sql("show variables").await?.collect().await?;
         let schema = batches[0].schema();
         let output = pretty_format_batches(&batches)?.to_string();
@@ -406,7 +390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_verbose_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show variables verbose")
             .await?
@@ -425,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show variables like '%target_partitions%'")
             .await?
@@ -439,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_verbose_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show variables verbose like '%target_partitions%'")
             .await?
@@ -456,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_catalogs_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session.sql("show catalogs").await?.collect().await?;
         let schema = batches[0].schema();
         let output = pretty_format_batches(&batches)?.to_string();
@@ -469,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_catalogs_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show catalogs like '%tern%'")
             .await?
@@ -483,7 +467,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_schemas_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show schemas like '%formation%'")
             .await?
@@ -497,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_tables_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::new().await?;
+        let session = ExtendedSessionContext::default().await?;
         let batches = session
             .sql("show tables like '%table%'")
             .await?
@@ -513,7 +497,7 @@ mod tests {
     #[test]
     fn test_show_like_sql_escapes_quotes() -> Result<()> {
         let session_context = SessionContext::new();
-        let session = ExtendedSessionContext { session_context };
+        let session = ExtendedSessionContext::default()?;
         let sql = session.build_filtered_virtual_table_sql(
             INFORMATION_SCHEMA_SHOW_CATALOGS,
             "catalog_name",
@@ -533,7 +517,8 @@ mod tests {
         let runtime_env = RuntimeEnvBuilder::new()
             .with_object_store_registry(instrumented_registry.clone())
             .build_arc()?;
-        let session = ExtendedSessionContext::new_with_runtime_env(runtime_env).await?;
+        let dobbydb_context = Arc::new(DobbyDbContext::default()?);
+        let session = ExtendedSessionContext::new(dobbydb_context, runtime_env).await?;
 
         let store_url = Url::parse("memory://bucket").unwrap();
         let object_store = Arc::new(InMemory::new());

@@ -38,68 +38,40 @@ pub struct InternalCatalog {
 
 impl InternalCatalog {
     pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        Self { catalog_manager }
+        Self {
+            catalog_manager,
+        }
     }
-    // }
-    // pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self> {
-    //     let information_schema = Arc::new(MemorySchemaProvider::new());
-    //
-    //     // show catalogs
-    //     information_schema.register_table(
-    //         INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
-    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-    //             InformationSchemaShowCatalogs::new(),
-    //         ))?),
-    //     )?;
-    //
-    //     // show schemas
-    //     information_schema.register_table(
-    //         INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
-    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-    //             InformationSchemaShowSchemas::new(catalog_provider_list.clone()),
-    //         ))?),
-    //     )?;
-    //
-    //     // show tables
-    //     information_schema.register_table(
-    //         INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
-    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-    //             InformationSchemaShowTables::new(catalog_provider_list.clone()),
-    //         ))?),
-    //     )?;
-    //
-    //     // show variables
-    //     information_schema.register_table(
-    //         INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
-    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-    //             InformationSchemaShowVariables::new(),
-    //         ))?),
-    //     )?;
-    //     Ok(Self { information_schema })
-    // }
 
     fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
         StreamingTable::try_new(table.schema().clone(), vec![table])
     }
 }
 
-// impl CatalogProvider for InternalCatalog {
-//     fn as_any(&self) -> &dyn Any {
-//         self
-//     }
-//
-//     fn schema_names(&self) -> Vec<String> {
-//         vec![String::from(INFORMATION_SCHEMA)]
-//     }
-//
-//     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-//         if name == INFORMATION_SCHEMA {
-//             Some(self.information_schema.clone())
-//         } else {
-//             None
-//         }
-//     }
-// }
+#[async_trait]
+impl DobbyDbCatalogProvider for InternalCatalog {
+    async fn list_schema_names(&self) -> Result<Vec<String>> {
+        Ok(vec![INFORMATION_SCHEMA.to_string()])
+    }
+
+    async fn list_table_names(&self, _schema_name: &str) -> Result<Vec<String>> {
+        Ok(vec![INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
+                INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
+                INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
+                INFORMATION_SCHEMA_SHOW_VARIABLES.to_string()
+        ])
+    }
+
+    async fn schema_exist(&self, schema_name: &str) -> Result<bool> {
+        let schema_names = self.list_schema_names().await?;
+        Ok(schema_names.iter().any(|name| name == schema_name))
+    }
+
+    async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool> {
+        let table_names = self.list_table_names(schema_name).await?;
+        Ok(table_names.iter().any(|name| name == table_name))
+    }
+}
 
 #[async_trait]
 impl AsyncCatalogProvider for InternalCatalog {

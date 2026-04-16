@@ -11,35 +11,6 @@ use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
 use dobbydb_sql::DobbyDbContext;
-// pub struct DobbyDBServer {
-//     pub config_path: String,
-//     pub catalog_manager: CatalogManager,
-//     pub runtime_manager: RuntimeManager,
-// }
-
-// impl DobbyDBServer {
-//     fn new(config_path: String) -> Result<Self> {
-//         let mut catalog_manager = CatalogManager::new();
-//         catalog_manager.load_config(&config_path)?;
-//         let runtime_manager = RuntimeManager::default();
-//         Ok(Self {
-//             config_path,
-//             catalog_manager,
-//             runtime_manager
-//         })
-//     }
-//
-//     // pub async fn init(&self) -> Result<()> {
-//     //     self.load_config()?;
-//     //     Ok(())
-//     // }
-//     //
-//     // fn load_config(&self) -> Result<()> {
-//     //     let mut catalog_manager = get_catalog_manager().write().unwrap();
-//     //     catalog_manager.load_config(&self.config_path)?;
-//     //     Ok(())
-//     // }
-// }
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
