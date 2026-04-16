@@ -65,7 +65,7 @@ struct DobbyDbArgs {
 
 pub fn main() -> Result<()> {
     let args = DobbyDbArgs::parse();
-    let mut dobbydb_context = Arc::new(DobbyDbContext::new(Some(&args.config))?);
+    let dobbydb_context = Arc::new(DobbyDbContext::new(Some(&args.config))?);
     let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
     cpu_handle.block_on(async_main(dobbydb_context.clone(), args))
 }

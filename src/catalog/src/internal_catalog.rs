@@ -1,12 +1,13 @@
 use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
+use crate::hms_catalog::HMSCatalog;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
 use datafusion::catalog::{
-    AsyncCatalogProvider, AsyncSchemaProvider, CatalogProvider, CatalogProviderList,
-    SchemaProvider, TableProvider,
+    AsyncCatalogProvider, AsyncSchemaProvider
+    , TableProvider,
 };
 use datafusion::common::Result;
 use datafusion::config::ConfigEntry;
@@ -15,7 +16,6 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
 use std::sync::Arc;
-use crate::hms_catalog::HMSCatalog;
 
 pub const INTERNAL_CATALOG: &str = "internal";
 pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
@@ -135,7 +135,9 @@ impl AsyncSchemaProvider for InformationSchema {
                 InformationSchemaShowSchemas::new(self.catalog_manager.clone()),
             ))?))
         } else if table_name == INFORMATION_SCHEMA_SHOW_TABLES {
-            todo!()
+            Ok(Some(wrap_with_stream_table(Arc::new(
+               InformationSchemaShowTables::new(self.catalog_manager.clone()),
+            ))?))
         } else if table_name == INFORMATION_SCHEMA_SHOW_VARIABLES {
             todo!()
         } else {
@@ -270,7 +272,7 @@ impl PartitionStream for InformationSchemaShowSchemas {
                     )));
                 };
 
-                let all_schemas: Vec<String> = match catalog_config {
+                let all_schema_names: Vec<String> = match catalog_config {
                     CatalogConfig::HMS(hms_catalog) => {
                         let hms_catalog = HMSCatalog::new(&Arc::new(hms_catalog.clone()));
                         hms_catalog.list_schema_names().await?
@@ -284,7 +286,7 @@ impl PartitionStream for InformationSchemaShowSchemas {
                 };
 
                 let mut schema_name_builder = StringBuilder::new();
-                for schema_name in all_schemas {
+                for schema_name in all_schema_names {
                     schema_name_builder.append_value(schema_name);
                 }
 
@@ -300,12 +302,12 @@ impl PartitionStream for InformationSchemaShowSchemas {
 
 #[derive(Debug)]
 struct InformationSchemaShowTables {
-    catalog_provider_list: Arc<dyn CatalogProviderList>,
+    catalog_manager: Arc<CatalogManager>,
     schema: SchemaRef,
 }
 
 impl InformationSchemaShowTables {
-    pub fn new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Self {
+    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
         let schema: SchemaRef = Arc::new(Schema::new(vec![Field::new(
             "table_name",
             DataType::Utf8,
@@ -313,7 +315,7 @@ impl InformationSchemaShowTables {
         )]));
 
         InformationSchemaShowTables {
-            catalog_provider_list,
+            catalog_manager,
             schema,
         }
     }
@@ -326,49 +328,49 @@ impl PartitionStream for InformationSchemaShowTables {
 
     fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
         let catalog = &ctx.session_config().options().catalog;
-        let default_catalog = &catalog.default_catalog;
-        let default_schema = &catalog.default_schema;
+        let default_catalog = catalog.default_catalog.clone();
+        let default_schema = catalog.default_schema.clone();
+        let catalog_manager = self.catalog_manager.clone();
+        let schema = Arc::clone(&self.schema);
 
-        let catalog_provider = match self.catalog_provider_list.catalog(default_catalog) {
-            Some(catalog_provider) => catalog_provider,
-            None => {
-                // catalog not found
-                let error =
-                    DataFusionError::Execution(format!("Catalog '{}' not found", default_catalog));
-                return Box::pin(RecordBatchStreamAdapter::new(
-                    Arc::clone(&self.schema),
-                    futures::stream::once(async move { Err(error) }),
-                ));
-            }
-        };
-
-        let schema_provider = match catalog_provider.schema(default_schema) {
-            Some(schema_provider) => schema_provider,
-            None => {
-                // schema not found
-                let error = DataFusionError::Execution(format!(
-                    "Schema '{}.{}' not found",
-                    default_catalog, default_schema
-                ));
-                return Box::pin(RecordBatchStreamAdapter::new(
-                    Arc::clone(&self.schema),
-                    futures::stream::once(async move { Err(error) }),
-                ));
-            }
-        };
-
-        let mut table_name_builder = StringBuilder::new();
-        for schema_name in &schema_provider.table_names() {
-            table_name_builder.append_value(schema_name.clone());
-        }
-        let batch = RecordBatch::try_new(
-            Arc::clone(&self.schema),
-            vec![Arc::new(table_name_builder.finish())],
-        )
-        .unwrap();
         Box::pin(RecordBatchStreamAdapter::new(
-            Arc::clone(&self.schema),
-            futures::stream::once(async move { Ok(batch) }),
+            Arc::clone(&schema),
+            futures::stream::once(async move {
+                let catalog_config = if let Some(catalog_config) =
+                    catalog_manager.get_catalog(&default_catalog)
+                {
+                    catalog_config
+                } else {
+                    return Err(DataFusionError::Execution(format!(
+                        "Catalog '{}' not found",
+                        default_catalog
+                    )));
+                };
+
+                let all_table_names: Vec<String> = match catalog_config {
+                    CatalogConfig::HMS(hms_catalog) => {
+                        let hms_catalog = HMSCatalog::new(&Arc::new(hms_catalog.clone()));
+                        hms_catalog.list_table_names(&default_schema).await?
+                    }
+                    CatalogConfig::GLUE(_glue_catalog) => {
+                        todo!()
+                    }
+                    CatalogConfig::Internal => {
+                        todo!()
+                    }
+                };
+
+                let mut schema_name_builder = StringBuilder::new();
+                for table_name in all_table_names {
+                    schema_name_builder.append_value(table_name);
+                }
+
+                RecordBatch::try_new(
+                    Arc::clone(&schema),
+                    vec![Arc::new(schema_name_builder.finish())],
+                )
+                    .map_err(|error| DataFusionError::External(Box::new(error)))
+            }),
         ))
     }
 }
