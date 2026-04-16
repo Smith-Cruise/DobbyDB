@@ -2,7 +2,7 @@ use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 use crate::DobbyDbContext;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::{AsyncCatalogProviderList, CatalogProviderList};
+use datafusion::catalog::AsyncCatalogProviderList;
 use datafusion::common::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
@@ -14,6 +14,7 @@ use datafusion::logical_expr::sqlparser::ast::{
 use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_catalog::catalog::{CatalogConfig, DobbyDbCatalogProvider, DobbyDbCatalogProviderList};
+use dobbydb_catalog::glue_catalog::GlueCatalog;
 use dobbydb_catalog::hms_catalog::HMSCatalog;
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
@@ -338,8 +339,9 @@ impl ExtendedSessionContext {
                     let hms_catalog = HMSCatalog::new(&Arc::new(hms_config.clone()));
                     hms_catalog.list_schema_names().await?
                 }
-                CatalogConfig::GLUE(_) => {
-                    todo!()
+                CatalogConfig::GLUE(glue_config) => {
+                    let glue_catalog = GlueCatalog::new(&Arc::new(glue_config.clone()));
+                    glue_catalog.list_schema_names().await?
                 }
             };
 

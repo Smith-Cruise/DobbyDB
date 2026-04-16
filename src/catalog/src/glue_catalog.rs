@@ -1,4 +1,4 @@
-use crate::catalog::CatalogConfig;
+use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
@@ -9,16 +9,13 @@ use async_trait::async_trait;
 use aws_config::Region;
 use aws_sdk_glue::Client;
 use aws_sdk_glue::config::Credentials;
-use datafusion::catalog::{CatalogProvider, SchemaProvider, TableProvider};
+use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use dobbydb_storage::storage::Storage;
 use iceberg::inspect::MetadataTableType;
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -52,41 +49,20 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
 
 #[derive(Debug)]
 pub struct GlueCatalog {
-    _config: Arc<GlueCatalogConfig>,
-    schemas: HashMap<String, Arc<dyn SchemaProvider>>,
+    config: Arc<GlueCatalogConfig>,
 }
 
 impl GlueCatalog {
-    pub async fn try_new(config: &Arc<GlueCatalogConfig>) -> Result<Self> {
-        let glue_client = build_glue_client(config).await;
-        let mut schemas: HashMap<String, Arc<dyn SchemaProvider>> = HashMap::new();
-        let dbs = glue_client
-            .get_databases()
-            .send()
-            .await
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        for database in dbs.database_list {
-            let glue_schema = GlueSchema::try_new(&glue_client, config, &database.name).await?;
-            schemas.insert(database.name.clone(), Arc::new(glue_schema));
+    pub fn new(config: &Arc<GlueCatalogConfig>) -> Self {
+        Self {
+            config: config.clone(),
         }
-        Ok(GlueCatalog {
-            _config: config.clone(),
-            schemas,
-        })
     }
 }
-
-impl CatalogProvider for GlueCatalog {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn schema_names(&self) -> Vec<String> {
-        self.schemas.keys().cloned().collect()
-    }
-
-    fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        self.schemas.get(name).cloned()
+#[async_trait]
+impl AsyncCatalogProvider for GlueCatalog {
+    async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
+        Ok(Some(Arc::new(GlueSchema::new(&self.config, schema_name))))
     }
 }
 
@@ -94,61 +70,45 @@ impl CatalogProvider for GlueCatalog {
 pub struct GlueSchema {
     config: Arc<GlueCatalogConfig>,
     schema_name: String,
-    table_names: HashSet<String>,
 }
 
 impl GlueSchema {
-    pub async fn try_new(
-        glue_client: &Client,
-        config: &Arc<GlueCatalogConfig>,
-        schema_name: &str,
-    ) -> Result<Self> {
-        let mut table_names = HashSet::new();
-        let resp = glue_client
-            .get_tables()
-            .database_name(schema_name)
-            .send()
-            .await
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
-        if let Some(glue_tables) = resp.table_list {
-            for glue_table in glue_tables {
-                table_names.insert(glue_table.name.clone());
-            }
-        }
-
-        Ok(Self {
+    pub fn new(config: &Arc<GlueCatalogConfig>, schema_name: &str) -> Self {
+        Self {
             config: config.clone(),
             schema_name: schema_name.to_string(),
-            table_names,
-        })
+        }
     }
 }
 
 #[async_trait]
-impl SchemaProvider for GlueSchema {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn table_names(&self) -> Vec<String> {
-        self.table_names.iter().cloned().collect()
-    }
-
+impl AsyncSchemaProvider for GlueSchema {
     async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
         let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
-        if !self.table_exist(tbl_name) {
-            return Ok(None);
+        if let Some(metadata_table_name) = metadata_table_name {
+            if MetadataTableType::try_from(metadata_table_name).is_err() {
+                return Ok(None);
+            }
         }
 
         let glue_client = build_glue_client(&self.config).await;
-        let resp = glue_client
+        let resp = match glue_client
             .get_table()
             .database_name(&self.schema_name)
             .name(table_name)
             .send()
             .await
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        {
+            Ok(resp) => resp,
+            Err(err) if err
+                .as_service_error()
+                .is_some_and(|err| err.is_entity_not_found_exception()) =>
+            {
+                return Ok(None);
+            }
+            Err(err) => return Err(DataFusionError::External(Box::new(err))),
+        };
 
         let glue_table = match resp.table {
             Some(glue_table) => glue_table,
@@ -177,7 +137,6 @@ impl SchemaProvider for GlueSchema {
                 .table_partition_cols()
                 .is_empty()
             {
-                // todo not checked
                 let paginator = glue_client
                     .get_partitions()
                     .database_name(&self.schema_name)
@@ -218,13 +177,43 @@ impl SchemaProvider for GlueSchema {
 
         Ok(Some(table_provider_builder.build().await?))
     }
+}
 
-    fn table_exist(&self, name: &str) -> bool {
-        if let Some((table_name, metadata_table_name)) = name.split_once('$') {
-            self.table_names.contains(table_name)
-                && MetadataTableType::try_from(metadata_table_name).is_ok()
-        } else {
-            self.table_names.contains(name)
+#[async_trait]
+impl DobbyDbCatalogProvider for GlueCatalog {
+    async fn list_schema_names(&self) -> Result<Vec<String>> {
+        let glue_client = build_glue_client(&self.config).await;
+        let paginator = glue_client.get_databases().into_paginator().send();
+        tokio::pin!(paginator);
+
+        let mut schema_names = Vec::new();
+        while let Some(page) = paginator.next().await {
+            let page = page.map_err(|e| DataFusionError::External(Box::new(e)))?;
+            for database in page.database_list() {
+                schema_names.push(database.name.clone());
+            }
         }
+
+        Ok(schema_names)
+    }
+
+    async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>> {
+        let glue_client = build_glue_client(&self.config).await;
+        let paginator = glue_client
+            .get_tables()
+            .database_name(schema_name)
+            .into_paginator()
+            .send();
+        tokio::pin!(paginator);
+
+        let mut table_names = Vec::new();
+        while let Some(page) = paginator.next().await {
+            let page = page.map_err(|e| DataFusionError::External(Box::new(e)))?;
+            for table in page.table_list() {
+                table_names.push(table.name.clone());
+            }
+        }
+
+        Ok(table_names)
     }
 }

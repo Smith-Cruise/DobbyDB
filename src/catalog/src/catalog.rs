@@ -1,4 +1,4 @@
-use crate::glue_catalog::GlueCatalogConfig;
+use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
 use crate::internal_catalog::{InternalCatalog, INTERNAL_CATALOG};
 use async_trait::async_trait;
@@ -115,8 +115,8 @@ impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
             CatalogConfig::HMS(hms_catalog) => {
                 Ok(Some(Arc::new(HMSCatalog::new(&Arc::new(hms_catalog)))))
             }
-            CatalogConfig::GLUE(_) => {
-                todo!()
+            CatalogConfig::GLUE(glue_catalog) => {
+                Ok(Some(Arc::new(GlueCatalog::new(&Arc::new(glue_catalog)))))
             }
         }
     }

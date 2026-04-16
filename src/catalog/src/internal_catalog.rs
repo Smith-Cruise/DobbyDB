@@ -1,4 +1,5 @@
 use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
+use crate::glue_catalog::GlueCatalog;
 use crate::hms_catalog::HMSCatalog;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
@@ -277,8 +278,9 @@ impl PartitionStream for InformationSchemaShowSchemas {
                         let hms_catalog = HMSCatalog::new(&Arc::new(hms_catalog.clone()));
                         hms_catalog.list_schema_names().await?
                     }
-                    CatalogConfig::GLUE(_glue_catalog) => {
-                        todo!()
+                    CatalogConfig::GLUE(glue_catalog) => {
+                        let glue_catalog = GlueCatalog::new(&Arc::new(glue_catalog.clone()));
+                        glue_catalog.list_schema_names().await?
                     }
                     CatalogConfig::Internal => {
                         todo!()
@@ -352,8 +354,9 @@ impl PartitionStream for InformationSchemaShowTables {
                         let hms_catalog = HMSCatalog::new(&Arc::new(hms_catalog.clone()));
                         hms_catalog.list_table_names(&default_schema).await?
                     }
-                    CatalogConfig::GLUE(_glue_catalog) => {
-                        todo!()
+                    CatalogConfig::GLUE(glue_catalog) => {
+                        let glue_catalog = GlueCatalog::new(&Arc::new(glue_catalog.clone()));
+                        glue_catalog.list_table_names(&default_schema).await?
                     }
                     CatalogConfig::Internal => {
                         todo!()
