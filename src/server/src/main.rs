@@ -65,12 +65,12 @@ struct DobbyDbArgs {
 
 pub fn main() -> Result<()> {
     let args = DobbyDbArgs::parse();
-    let mut dobbydb_context = DobbyDbContext::new(Some(&args.config))?;
+    let mut dobbydb_context = Arc::new(DobbyDbContext::new(Some(&args.config))?);
     let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
-    cpu_handle.block_on(async_main(dobbydb_context, args))
+    cpu_handle.block_on(async_main(dobbydb_context.clone(), args))
 }
 
-async fn async_main(dobbydb_context: DobbyDbContext, args: DobbyDbArgs) -> Result<()> {
+async fn async_main(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> Result<()> {
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );

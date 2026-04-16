@@ -124,7 +124,7 @@ impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
 
 #[async_trait]
 pub trait DobbyDbCatalogProvider {
-    async fn list_schemas(&self) -> Result<Vec<String>>;
+    async fn list_schema_names(&self) -> Result<Vec<String>>;
 
-    async fn list_tables(&self, schema_name: &str) -> Result<Vec<String>>;
+    async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>>;
 }

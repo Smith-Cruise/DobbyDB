@@ -13,10 +13,11 @@ use datafusion::logical_expr::sqlparser::ast::{
 };
 use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::DobbyDbCatalogProviderList;
+use dobbydb_catalog::catalog::{CatalogConfig, DobbyDbCatalogProvider, DobbyDbCatalogProviderList};
+use dobbydb_catalog::hms_catalog::HMSCatalog;
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
-    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG
+    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -62,7 +63,7 @@ impl SessionManager {
 }
 
 pub struct ExtendedSessionContext {
-    dobbydb_context: DobbyDbContext,
+    dobbydb_context: Arc<DobbyDbContext>,
     session_context: SessionContext,
 }
 
@@ -72,12 +73,15 @@ impl ExtendedSessionContext {
     // }
 
     pub async fn default() -> Result<Self> {
-        let dobbydb_context = DobbyDbContext::default()?;
+        let dobbydb_context = Arc::new(DobbyDbContext::default()?);
         let runtime_env = Arc::new(RuntimeEnv::default());
         Self::new(dobbydb_context, runtime_env).await
     }
 
-    pub async fn new(dobbydb_context: DobbyDbContext, runtime_env: Arc<RuntimeEnv>) -> Result<Self> {
+    pub async fn new(
+        dobbydb_context: Arc<DobbyDbContext>,
+        runtime_env: Arc<RuntimeEnv>,
+    ) -> Result<Self> {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
@@ -93,7 +97,10 @@ impl ExtendedSessionContext {
         // );
         //
         // session_context.register_catalog_list(memory_catalog_provider_list);
-        Ok(Self { session_context , dobbydb_context})
+        Ok(Self {
+            session_context,
+            dobbydb_context,
+        })
     }
 
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
@@ -119,7 +126,9 @@ impl ExtendedSessionContext {
             }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
-                    return self.handle_use_stmt(use_stmt).await;
+                    return self
+                        .handle_use_stmt(use_stmt)
+                        .await;
                 }
                 Statement::ShowSchemas { show_options, .. } => {
                     self.build_show_schemas_sql(show_options)?
@@ -143,9 +152,13 @@ impl ExtendedSessionContext {
         let references = state.resolve_table_references(&statement)?;
         // Now we can asynchronously resolve the table references to get a cached catalog
         // that we can use for our query
-        let catalog_provider_list = DobbyDbCatalogProviderList::new(self.dobbydb_context.catalog_manager.clone());
-        let resolved_catalog_providers = catalog_provider_list.resolve(&references, state.config()).await?;
-        self.session_context.register_catalog_list(resolved_catalog_providers);
+        let catalog_provider_list =
+            DobbyDbCatalogProviderList::new(self.dobbydb_context.catalog_manager.clone());
+        let resolved_catalog_providers = catalog_provider_list
+            .resolve(&references, state.config())
+            .await?;
+        self.session_context
+            .register_catalog_list(resolved_catalog_providers);
         self.session_context.sql(&sql_string).await
     }
 
@@ -294,8 +307,12 @@ impl ExtendedSessionContext {
             }
         };
 
-        let catalog_provider = match self.session_context.catalog(&catalog_name) {
-            Some(catalog_provider) => catalog_provider,
+        let catalog_config = match self
+            .dobbydb_context
+            .catalog_manager
+            .get_catalog(&catalog_name)
+        {
+            Some(catalog_config) => catalog_config,
             None => {
                 return Err(DataFusionError::Plan(format!(
                     "unknown catalog {}",
@@ -313,7 +330,27 @@ impl ExtendedSessionContext {
             .default_catalog = catalog_name.clone();
 
         if let Some(schema_name) = schema_name {
-            if catalog_provider.schema(&schema_name).is_none() {
+            let all_schema_names: Vec<String> = match catalog_config {
+                CatalogConfig::Internal => {
+                    todo!()
+                }
+                CatalogConfig::HMS(hms_config) => {
+                    let hms_catalog = HMSCatalog::new(&Arc::new(hms_config.clone()));
+                    hms_catalog.list_schema_names().await?
+                }
+                CatalogConfig::GLUE(_) => {
+                    todo!()
+                }
+            };
+
+            let mut has_found = false;
+            for each_schema_name in all_schema_names {
+                if each_schema_name == schema_name {
+                    has_found = true;
+                }
+            }
+
+            if !has_found {
                 return Err(DataFusionError::Plan(format!(
                     "unknown schema {}",
                     schema_name
@@ -327,6 +364,7 @@ impl ExtendedSessionContext {
                 .catalog
                 .default_schema = schema_name.clone();
         }
+
         let empty_logical_plan = LogicalPlanBuilder::empty(false).build()?;
         self.session_context
             .execute_logical_plan(empty_logical_plan)
