@@ -5,5 +5,4 @@ edition = { workspace = true }
 
 
 [dependencies]
-tokio = { workspace = true }
-dobbydb-catalog = { workspace = true }
+tokio = {workspace = true}

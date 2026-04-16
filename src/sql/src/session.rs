@@ -1,22 +1,22 @@
 use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
+use crate::DobbyDbContext;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::catalog::{AsyncCatalogProviderList, CatalogProviderList, MemoryCatalogProviderList};
+use datafusion::catalog::{AsyncCatalogProviderList, CatalogProviderList};
 use datafusion::common::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
-use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::LogicalPlanBuilder;
+use datafusion::execution::TaskContext;
 use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
+use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::{get_catalog_manager, register_catalogs_into_catalog_provider, DobbyDbCatalogProviderList};
+use dobbydb_catalog::catalog::DobbyDbCatalogProviderList;
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
-    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
-    InternalCatalog,
+    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG
 };
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -62,6 +62,7 @@ impl SessionManager {
 }
 
 pub struct ExtendedSessionContext {
+    dobbydb_context: DobbyDbContext,
     session_context: SessionContext,
 }
 
@@ -70,27 +71,29 @@ impl ExtendedSessionContext {
     //     Self::new_with_runtime_env(Arc::new(RuntimeEnv::default())).await
     // }
 
-    pub async fn new(server: Arc<DobbyDbServer>) -> Result<Self> {
-
+    pub async fn default() -> Result<Self> {
+        let dobbydb_context = DobbyDbContext::default()?;
+        let runtime_env = Arc::new(RuntimeEnv::default());
+        Self::new(dobbydb_context, runtime_env).await
     }
 
-    pub async fn new_with_runtime_env(runtime_env: Arc<RuntimeEnv>) -> Result<Self> {
+    pub async fn new(dobbydb_context: DobbyDbContext, runtime_env: Arc<RuntimeEnv>) -> Result<Self> {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
-        let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
+        // let memory_catalog_provider_list = Arc::new(MemoryCatalogProviderList::new());
 
-        let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
+        // let all_catalogs = get_catalog_manager().read().unwrap().get_all_catalogs();
         // register_catalogs_into_catalog_provider(memory_catalog_provider_list.clone(), all_catalogs) .await?;
 
-        // load internal catalog
-        memory_catalog_provider_list.register_catalog(
-            INTERNAL_CATALOG.to_string(),
-            Arc::new(InternalCatalog::try_new(memory_catalog_provider_list.clone()).await?),
-        );
-
-        session_context.register_catalog_list(memory_catalog_provider_list);
-        Ok(Self { session_context })
+        // // load internal catalog
+        // memory_catalog_provider_list.register_catalog(
+        //     INTERNAL_CATALOG.to_string(),
+        //     Arc::new(InternalCatalog::try_new(memory_catalog_provider_list.clone()).await?),
+        // );
+        //
+        // session_context.register_catalog_list(memory_catalog_provider_list);
+        Ok(Self { session_context , dobbydb_context})
     }
 
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
@@ -140,14 +143,10 @@ impl ExtendedSessionContext {
         let references = state.resolve_table_references(&statement)?;
         // Now we can asynchronously resolve the table references to get a cached catalog
         // that we can use for our query
-        let catalog_provider_list = DobbyDbCatalogProviderList::new();
+        let catalog_provider_list = DobbyDbCatalogProviderList::new(self.dobbydb_context.catalog_manager.clone());
         let resolved_catalog_providers = catalog_provider_list.resolve(&references, state.config()).await?;
-        let new_ctx = self.session_context.clone();
-        new_ctx.register_catalog_list(resolved_catalog_providers);
-        new_ctx.sql(&sql_string).await
-
-
-        // self.session_context.sql(&sql_string).await
+        self.session_context.register_catalog_list(resolved_catalog_providers);
+        self.session_context.sql(&sql_string).await
     }
 
     pub fn task_ctx(&self) -> Arc<TaskContext> {

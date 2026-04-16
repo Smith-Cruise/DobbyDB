@@ -8,44 +8,42 @@ use datafusion_cli::object_storage::instrumented::{
 };
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
-use dobbydb_catalog::catalog::{get_catalog_manager, CatalogManager};
-use dobbydb_common::runtime::{get_runtime_manager, RuntimeManager};
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
+use dobbydb_sql::DobbyDbContext;
+// pub struct DobbyDBServer {
+//     pub config_path: String,
+//     pub catalog_manager: CatalogManager,
+//     pub runtime_manager: RuntimeManager,
+// }
 
-pub struct DobbyDBServer {
-    pub config_path: String,
-    pub catalog_manager: CatalogManager,
-    pub runtime_manager: RuntimeManager,
-}
-
-impl DobbyDBServer {
-    fn new(config_path: String) -> Result<Self> {
-        let mut catalog_manager = CatalogManager::new();
-        catalog_manager.load_config(&config_path)?;
-        let runtime_manager = RuntimeManager::default();
-        Ok(Self {
-            config_path,
-            catalog_manager,
-            runtime_manager
-        })
-    }
-
-    // pub async fn init(&self) -> Result<()> {
-    //     self.load_config()?;
-    //     Ok(())
-    // }
-    //
-    // fn load_config(&self) -> Result<()> {
-    //     let mut catalog_manager = get_catalog_manager().write().unwrap();
-    //     catalog_manager.load_config(&self.config_path)?;
-    //     Ok(())
-    // }
-}
+// impl DobbyDBServer {
+//     fn new(config_path: String) -> Result<Self> {
+//         let mut catalog_manager = CatalogManager::new();
+//         catalog_manager.load_config(&config_path)?;
+//         let runtime_manager = RuntimeManager::default();
+//         Ok(Self {
+//             config_path,
+//             catalog_manager,
+//             runtime_manager
+//         })
+//     }
+//
+//     // pub async fn init(&self) -> Result<()> {
+//     //     self.load_config()?;
+//     //     Ok(())
+//     // }
+//     //
+//     // fn load_config(&self) -> Result<()> {
+//     //     let mut catalog_manager = get_catalog_manager().write().unwrap();
+//     //     catalog_manager.load_config(&self.config_path)?;
+//     //     Ok(())
+//     // }
+// }
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct DobbyDBArgs {
+struct DobbyDbArgs {
     #[clap(long, help = "Specify config path")]
     config: String,
 
@@ -66,13 +64,13 @@ struct DobbyDBArgs {
 }
 
 pub fn main() -> Result<()> {
-    let args = DobbyDBArgs::parse();
-    let server = Arc::new(DobbyDBServer::new(args.config.clone())?);
-    let cpu_handle = server.runtime_manager.cpu_handle();
-    cpu_handle.block_on(async_main(server, args))
+    let args = DobbyDbArgs::parse();
+    let mut dobbydb_context = DobbyDbContext::new(Some(&args.config))?;
+    let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
+    cpu_handle.block_on(async_main(dobbydb_context, args))
 }
 
-async fn async_main(server: Arc<DobbyDBServer>, args: DobbyDBArgs) -> Result<()> {
+async fn async_main(dobbydb_context: DobbyDbContext, args: DobbyDbArgs) -> Result<()> {
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
@@ -87,7 +85,7 @@ async fn async_main(server: Arc<DobbyDBServer>, args: DobbyDBArgs) -> Result<()>
         color: true,
         instrumented_registry: instrumented_registry.clone(),
     };
-    let session_context = ExtendedSessionContext::new_with_runtime_env(runtime_env).await?;
+    let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env).await?;
     let commands = args.command;
     if commands.is_empty() {
         exec::exec_from_repl(&session_context, &print_options).await;

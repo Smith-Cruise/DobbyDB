@@ -8,6 +8,7 @@ datafusion = { workspace = true }
 sqlparser = { workspace = true }
 tokio = { workspace = true }
 dobbydb-catalog = { workspace = true }
+dobbydb-common = { workspace = true }
 
 [dev-dependencies]
 datafusion-cli = { workspace = true }

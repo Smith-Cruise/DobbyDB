@@ -33,6 +33,9 @@ impl TableProviderBuilder {
         let storage = match catalog_config {
             CatalogConfig::GLUE(glue_config) => glue_config.storage.clone(),
             CatalogConfig::HMS(hms_config) => hms_config.storage.clone(),
+            CatalogConfig::Internal => {
+                panic!("unreachable")
+            }
         };
         Self {
             table_reference,

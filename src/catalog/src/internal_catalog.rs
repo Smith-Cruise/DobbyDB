@@ -1,18 +1,20 @@
-use crate::catalog::{CatalogConfig, get_catalog_manager};
+use crate::catalog::{CatalogConfig, CatalogManager};
+use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
-use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, CatalogProvider, CatalogProviderList, MemorySchemaProvider, SchemaProvider, TableProvider};
+use datafusion::catalog::{
+    AsyncCatalogProvider, AsyncSchemaProvider, CatalogProvider, CatalogProviderList,
+    SchemaProvider, TableProvider,
+};
 use datafusion::common::Result;
 use datafusion::config::ConfigEntry;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::streaming::PartitionStream;
-use std::any::Any;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 pub const INTERNAL_CATALOG: &str = "internal";
 pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
@@ -21,85 +23,89 @@ pub const INFORMATION_SCHEMA_SHOW_TABLES: &str = "tables";
 pub const INFORMATION_SCHEMA_SHOW_VARIABLES: &str = "variables";
 
 pub fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<Arc<StreamingTable>> {
-    Ok(Arc::new(StreamingTable::try_new(table.schema().clone(), vec![table])?))
+    Ok(Arc::new(StreamingTable::try_new(
+        table.schema().clone(),
+        vec![table],
+    )?))
 }
 
 #[derive(Debug)]
 pub struct InternalCatalog {
-    information_schema: Arc<dyn SchemaProvider>,
+    catalog_manager: Arc<CatalogManager>,
 }
 
 impl InternalCatalog {
-    pub fn new() -> Self {
-        Self {
-            information_schema: Arc::new(MemorySchemaProvider::new())
-        }
+    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
+        Self { catalog_manager }
     }
-    pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self> {
-        let information_schema = Arc::new(MemorySchemaProvider::new());
-
-        // show catalogs
-        information_schema.register_table(
-            INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
-            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowCatalogs::new(),
-            ))?),
-        )?;
-
-        // show schemas
-        information_schema.register_table(
-            INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
-            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowSchemas::new(catalog_provider_list.clone()),
-            ))?),
-        )?;
-
-        // show tables
-        information_schema.register_table(
-            INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
-            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowTables::new(catalog_provider_list.clone()),
-            ))?),
-        )?;
-
-        // show variables
-        information_schema.register_table(
-            INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
-            Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
-                InformationSchemaShowVariables::new(),
-            ))?),
-        )?;
-        Ok(Self { information_schema })
-    }
+    // }
+    // pub async fn try_new(catalog_provider_list: Arc<dyn CatalogProviderList>) -> Result<Self> {
+    //     let information_schema = Arc::new(MemorySchemaProvider::new());
+    //
+    //     // show catalogs
+    //     information_schema.register_table(
+    //         INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
+    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+    //             InformationSchemaShowCatalogs::new(),
+    //         ))?),
+    //     )?;
+    //
+    //     // show schemas
+    //     information_schema.register_table(
+    //         INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
+    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+    //             InformationSchemaShowSchemas::new(catalog_provider_list.clone()),
+    //         ))?),
+    //     )?;
+    //
+    //     // show tables
+    //     information_schema.register_table(
+    //         INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
+    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+    //             InformationSchemaShowTables::new(catalog_provider_list.clone()),
+    //         ))?),
+    //     )?;
+    //
+    //     // show variables
+    //     information_schema.register_table(
+    //         INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
+    //         Arc::new(InternalCatalog::wrap_with_stream_table(Arc::new(
+    //             InformationSchemaShowVariables::new(),
+    //         ))?),
+    //     )?;
+    //     Ok(Self { information_schema })
+    // }
 
     fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
         StreamingTable::try_new(table.schema().clone(), vec![table])
     }
 }
 
-impl CatalogProvider for InternalCatalog {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn schema_names(&self) -> Vec<String> {
-        vec![String::from(INFORMATION_SCHEMA)]
-    }
-
-    fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
-        if name == INFORMATION_SCHEMA {
-            Some(self.information_schema.clone())
-        } else {
-            None
-        }
-    }
-}
+// impl CatalogProvider for InternalCatalog {
+//     fn as_any(&self) -> &dyn Any {
+//         self
+//     }
+//
+//     fn schema_names(&self) -> Vec<String> {
+//         vec![String::from(INFORMATION_SCHEMA)]
+//     }
+//
+//     fn schema(&self, name: &str) -> Option<Arc<dyn SchemaProvider>> {
+//         if name == INFORMATION_SCHEMA {
+//             Some(self.information_schema.clone())
+//         } else {
+//             None
+//         }
+//     }
+// }
 
 #[async_trait]
 impl AsyncCatalogProvider for InternalCatalog {
     async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
         if schema_name == INFORMATION_SCHEMA {
-            Ok(Some(Arc::new(InformationSchema::new())))
+            Ok(Some(Arc::new(InformationSchema::new(
+                self.catalog_manager.clone(),
+            ))))
         } else {
             Ok(None)
         }
@@ -107,14 +113,12 @@ impl AsyncCatalogProvider for InternalCatalog {
 }
 
 struct InformationSchema {
-
+    catalog_manager: Arc<CatalogManager>,
 }
 
 impl InformationSchema {
-    pub fn new() -> Self {
-        Self {
-
-        }
+    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
+        Self { catalog_manager }
     }
 }
 
@@ -122,7 +126,9 @@ impl InformationSchema {
 impl AsyncSchemaProvider for InformationSchema {
     async fn table(&self, table_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
         if table_name == INFORMATION_SCHEMA_SHOW_CATALOGS {
-            Ok(Some(wrap_with_stream_table(Arc::new(InformationSchemaShowCatalogs::new()))?))
+            Ok(Some(wrap_with_stream_table(Arc::new(
+                InformationSchemaShowCatalogs::new(self.catalog_manager.clone()),
+            ))?))
         } else if table_name == INFORMATION_SCHEMA_SHOW_SCHEMAS {
             todo!()
         } else if table_name == INFORMATION_SCHEMA_SHOW_TABLES {
@@ -137,11 +143,12 @@ impl AsyncSchemaProvider for InformationSchema {
 
 #[derive(Debug)]
 pub struct InformationSchemaShowCatalogs {
+    catalog_manager: Arc<CatalogManager>,
     schema: SchemaRef,
 }
 
 impl InformationSchemaShowCatalogs {
-    pub fn new() -> Self {
+    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("catalog_name", DataType::Utf8, false),
             Field::new("catalog_type", DataType::Utf8, false),
@@ -149,6 +156,7 @@ impl InformationSchemaShowCatalogs {
         ]));
 
         InformationSchemaShowCatalogs {
+            catalog_manager,
             schema,
         }
     }
@@ -164,8 +172,7 @@ impl PartitionStream for InformationSchemaShowCatalogs {
         let mut catalog_type_builder = StringBuilder::new();
         let mut catalog_configs_builder = StringBuilder::new();
 
-        let catalog_manager = get_catalog_manager().read().unwrap();
-        let all_catalogs = catalog_manager.get_all_catalogs();
+        let all_catalogs = self.catalog_manager.list_catalogs();
         for (catalog_name, catalog_config) in &all_catalogs {
             catalog_name_builder.append_value(catalog_name);
             if catalog_name == INTERNAL_CATALOG {
@@ -182,6 +189,10 @@ impl PartitionStream for InformationSchemaShowCatalogs {
                 CatalogConfig::GLUE(glue_catalog) => {
                     catalog_type_builder.append_value("GLUE");
                     catalog_configs_builder.append_value(format!("{:?}", glue_catalog));
+                }
+                CatalogConfig::Internal => {
+                    catalog_type_builder.append_value("INTERNAL");
+                    catalog_configs_builder.append_null();
                 }
             }
         }
