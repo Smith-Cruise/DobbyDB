@@ -66,46 +66,14 @@ pub fn from_thrift_exception<T, E: Debug>(value: MaybeException<T, E>) -> Result
 #[derive(Debug)]
 pub struct HMSCatalog {
     config: Arc<HMSCatalogConfig>,
-    // schemas: HashMap<String, Arc<dyn SchemaProvider>>,
 }
 
 impl HMSCatalog {
     pub fn new(config: &Arc<HMSCatalogConfig>) -> Self {
         Self {
             config: config.clone(),
-            // schemas: HashMap::new(),
         }
     }
-
-    // pub async fn try_new(config: &Arc<HMSCatalogConfig>) -> Result<Self> {
-    //     let hms_client = build_hms_client(config)?;
-    //     let all_database_names = hms_client
-    //         .get_all_databases()
-    //         .await
-    //         .map(from_thrift_exception)
-    //         .map_err(|e| DataFusionError::External(e.into()))??;
-    //
-    //     let mut schemas: HashMap<String, Arc<dyn SchemaProvider>> = HashMap::new();
-    //     for schema_name in all_database_names {
-    //         let schema_provider =
-    //             HMSSchema::try_new(&hms_client, config, schema_name.as_str()).await?;
-    //         schemas.insert(schema_name.to_string(), Arc::new(schema_provider));
-    //     }
-    //     Ok(Self {
-    //         config: config.clone(),
-    //         schemas,
-    //     })
-    // }
-
-    // pub async fn list_schemas(&self) -> Result<Vec<String>> {
-    //     let hms_client = build_hms_client(&self.config)?;
-    //     let all_database_names = hms_client
-    //         .get_all_databases()
-    //         .await
-    //         .map(from_thrift_exception)
-    //         .map_err(|e| DataFusionError::External(e.into()))??;
-    //     all_database_names.into_iter().map(|name| name.to_string()).collect()
-    // }
 }
 
 #[async_trait]

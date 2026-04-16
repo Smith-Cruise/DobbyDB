@@ -56,7 +56,7 @@ async fn async_main(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> 
         color: true,
         instrumented_registry: instrumented_registry.clone(),
     };
-    let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env).await?;
+    let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env)?;
     let commands = args.command;
     if commands.is_empty() {
         exec::exec_from_repl(&session_context, &print_options).await;

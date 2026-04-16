@@ -22,7 +22,7 @@ pub enum CatalogConfig {
     GLUE(GlueCatalogConfig),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CatalogManager {
     catalogs: HashMap<String, CatalogConfig>,
 }
@@ -78,6 +78,55 @@ impl CatalogManager {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
+    }
+
+    fn build_catalog_provider(
+        &self,
+        catalog_name: &str,
+    ) -> Result<Box<dyn DobbyDbCatalogProvider + Send + Sync>> {
+        let catalog_config = self
+            .get_catalog(catalog_name)
+            .ok_or_else(|| DataFusionError::Plan(format!("unknown catalog {}", catalog_name)))?;
+
+        match catalog_config {
+            CatalogConfig::Internal => {
+                Ok(Box::new(InternalCatalog::new(Arc::new(self.clone()))))
+            }
+            CatalogConfig::HMS(hms_catalog) => {
+                Ok(Box::new(HMSCatalog::new(&Arc::new(hms_catalog.clone()))))
+            }
+            CatalogConfig::GLUE(glue_catalog) => {
+                Ok(Box::new(GlueCatalog::new(&Arc::new(glue_catalog.clone()))))
+            }
+        }
+    }
+
+    pub fn catalog_exists(&self, catalog_name: &str) -> bool {
+        self.catalogs.contains_key(catalog_name)
+    }
+
+    pub async fn list_schema_names(&self, catalog_name: &str) -> Result<Vec<String>> {
+        self.build_catalog_provider(catalog_name)?
+            .list_schema_names()
+            .await
+    }
+
+    pub async fn list_table_names(&self, catalog_name: &str, schema_name: &str) -> Result<Vec<String>> {
+        self.build_catalog_provider(catalog_name)?
+            .list_table_names(schema_name)
+            .await
+    }
+
+    pub async fn schema_exist(&self, catalog_name: &str, schema_name: &str) -> Result<bool> {
+        self.build_catalog_provider(catalog_name)?
+            .schema_exist(schema_name)
+            .await
+    }
+
+    pub async fn table_exists(&self, catalog_name: &str, schema_name: &str, table_name: &str) -> Result<bool> {
+        self.build_catalog_provider(catalog_name)?
+            .table_exist(table_name, schema_name)
+            .await
     }
 }
 

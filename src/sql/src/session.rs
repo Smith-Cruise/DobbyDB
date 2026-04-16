@@ -292,19 +292,12 @@ impl ExtendedSessionContext {
             }
         };
 
-        let catalog_config = match self
-            .dobbydb_context
-            .catalog_manager
-            .get_catalog(&catalog_name)
-        {
-            Some(catalog_config) => catalog_config,
-            None => {
-                return Err(DataFusionError::Plan(format!(
-                    "unknown catalog {}",
-                    catalog_name
-                )));
-            }
-        };
+        if !self.dobbydb_context.catalog_manager.catalog_exists(&catalog_name) {
+            return Err(DataFusionError::Plan(format!(
+                "unknown catalog {}",
+                catalog_name
+            )));
+        }
 
         let state = self.session_context.state_ref();
         state
@@ -315,28 +308,7 @@ impl ExtendedSessionContext {
             .default_catalog = catalog_name.clone();
 
         if let Some(schema_name) = schema_name {
-            let all_schema_names: Vec<String> = match catalog_config {
-                CatalogConfig::Internal => {
-                    todo!()
-                }
-                CatalogConfig::HMS(hms_config) => {
-                    let hms_catalog = HMSCatalog::new(&Arc::new(hms_config.clone()));
-                    hms_catalog.list_schema_names().await?
-                }
-                CatalogConfig::GLUE(glue_config) => {
-                    let glue_catalog = GlueCatalog::new(&Arc::new(glue_config.clone()));
-                    glue_catalog.list_schema_names().await?
-                }
-            };
-
-            let mut has_found = false;
-            for each_schema_name in all_schema_names {
-                if each_schema_name == schema_name {
-                    has_found = true;
-                }
-            }
-
-            if !has_found {
+            if !self.dobbydb_context.catalog_manager.schema_exist(&catalog_name, &schema_name).await? {
                 return Err(DataFusionError::Plan(format!(
                     "unknown schema {}",
                     schema_name
