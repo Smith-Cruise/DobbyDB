@@ -86,10 +86,10 @@ impl AsyncSchemaProvider for GlueSchema {
     async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
         let (table_name, metadata_table_name) = split_table_name(tbl_name);
 
-        if let Some(metadata_table_name) = metadata_table_name {
-            if MetadataTableType::try_from(metadata_table_name).is_err() {
-                return Ok(None);
-            }
+        if let Some(metadata_table_name) = metadata_table_name
+            && MetadataTableType::try_from(metadata_table_name).is_err()
+        {
+            return Ok(None);
         }
 
         let glue_client = build_glue_client(&self.config).await;

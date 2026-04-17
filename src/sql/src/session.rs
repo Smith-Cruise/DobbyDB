@@ -1,25 +1,24 @@
+use crate::DobbyDbContext;
 use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
-use crate::DobbyDbContext;
-use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::AsyncCatalogProviderList;
+use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::common::Result;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
-use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::TaskContext;
+use datafusion::execution::runtime_env::RuntimeEnv;
+use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
-use datafusion::logical_expr::LogicalPlanBuilder;
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::{CatalogConfig, DobbyDbCatalogProvider, DobbyDbCatalogProviderList};
-use dobbydb_catalog::glue_catalog::GlueCatalog;
-use dobbydb_catalog::hms_catalog::HMSCatalog;
+use dobbydb_catalog::catalog::{CatalogManager, DobbyDbCatalogProviderList};
 use dobbydb_catalog::internal_catalog::{
     INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
     INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
 };
+use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -69,23 +68,23 @@ pub struct ExtendedSessionContext {
 }
 
 impl ExtendedSessionContext {
-    pub fn default() -> Result<Self> {
-        let dobbydb_context = Arc::new(DobbyDbContext::default()?);
+    pub fn default() -> Self {
+        let dobbydb_context = Arc::new(DobbyDbContext {
+            catalog_manager: Arc::new(CatalogManager::default()),
+            runtime_manager: Arc::new(RuntimeManager::default())
+        });
         let runtime_env = Arc::new(RuntimeEnv::default());
         Self::new(dobbydb_context, runtime_env)
     }
 
-    pub fn new(
-        dobbydb_context: Arc<DobbyDbContext>,
-        runtime_env: Arc<RuntimeEnv>,
-    ) -> Result<Self> {
+    pub fn new(dobbydb_context: Arc<DobbyDbContext>, runtime_env: Arc<RuntimeEnv>) -> Self {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
-        Ok(Self {
+        Self {
             session_context,
             dobbydb_context,
-        })
+        }
     }
 
     pub async fn sql(&self, sql: &str) -> Result<DataFrame> {
@@ -111,9 +110,7 @@ impl ExtendedSessionContext {
             }
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
-                    return self
-                        .handle_use_stmt(use_stmt)
-                        .await;
+                    return self.handle_use_stmt(use_stmt).await;
                 }
                 Statement::ShowSchemas { show_options, .. } => {
                     self.build_show_schemas_sql(show_options)?
@@ -292,7 +289,11 @@ impl ExtendedSessionContext {
             }
         };
 
-        if !self.dobbydb_context.catalog_manager.catalog_exists(&catalog_name) {
+        if !self
+            .dobbydb_context
+            .catalog_manager
+            .catalog_exists(&catalog_name)
+        {
             return Err(DataFusionError::Plan(format!(
                 "unknown catalog {}",
                 catalog_name
@@ -308,7 +309,12 @@ impl ExtendedSessionContext {
             .default_catalog = catalog_name.clone();
 
         if let Some(schema_name) = schema_name {
-            if !self.dobbydb_context.catalog_manager.schema_exist(&catalog_name, &schema_name).await? {
+            if !self
+                .dobbydb_context
+                .catalog_manager
+                .schema_exist(&catalog_name, &schema_name)
+                .await?
+            {
                 return Err(DataFusionError::Plan(format!(
                     "unknown schema {}",
                     schema_name
@@ -348,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session.sql("show variables").await?.collect().await?;
         let schema = batches[0].schema();
         let output = pretty_format_batches(&batches)?.to_string();
@@ -362,7 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_verbose_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show variables verbose")
             .await?
@@ -381,7 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show variables like '%target_partitions%'")
             .await?
@@ -395,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_variables_verbose_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show variables verbose like '%target_partitions%'")
             .await?
@@ -412,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_catalogs_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session.sql("show catalogs").await?.collect().await?;
         let schema = batches[0].schema();
         let output = pretty_format_batches(&batches)?.to_string();
@@ -425,7 +431,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_catalogs_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show catalogs like '%tern%'")
             .await?
@@ -439,7 +445,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_schemas_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show schemas like '%formation%'")
             .await?
@@ -453,23 +459,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_tables_like_execution() -> Result<()> {
-        let session = ExtendedSessionContext::default().await?;
+        let session = ExtendedSessionContext::default();
         let batches = session
             .sql("show tables like '%table%'")
             .await?
             .collect()
             .await?;
         let output = pretty_format_batches(&batches)?.to_string();
-        println!("{}", output);
-
         assert_contains!(output.as_str(), "tables");
         Ok(())
     }
 
     #[test]
     fn test_show_like_sql_escapes_quotes() -> Result<()> {
-        let session_context = SessionContext::new();
-        let session = ExtendedSessionContext::default()?;
+        let session = ExtendedSessionContext::default();
         let sql = session.build_filtered_virtual_table_sql(
             INFORMATION_SCHEMA_SHOW_CATALOGS,
             "catalog_name",
@@ -489,8 +492,8 @@ mod tests {
         let runtime_env = RuntimeEnvBuilder::new()
             .with_object_store_registry(instrumented_registry.clone())
             .build_arc()?;
-        let dobbydb_context = Arc::new(DobbyDbContext::default()?);
-        let session = ExtendedSessionContext::new(dobbydb_context, runtime_env).await?;
+        let dobbydb_context = Arc::new(DobbyDbContext::default());
+        let session = ExtendedSessionContext::new(dobbydb_context, runtime_env);
 
         let store_url = Url::parse("memory://bucket").unwrap();
         let object_store = Arc::new(InMemory::new());
@@ -514,6 +517,7 @@ mod tests {
             .await?;
 
         let batches = session
+            .session_context()
             .sql("select count(*) as cnt from instrumented_csv")
             .await?
             .collect()

@@ -164,29 +164,6 @@ impl HMSSchema {
             table_names: HashSet::new(),
         })
     }
-
-    pub async fn try_new(
-        hms_client: &ThriftHiveMetastoreClient,
-        config: &Arc<HMSCatalogConfig>,
-        schema_name: &str,
-    ) -> Result<Self> {
-        let all_tables = hms_client
-            .get_all_tables(schema_name.to_string().into())
-            .await
-            .map(from_thrift_exception)
-            .map_err(|e| DataFusionError::External(e.into()))??;
-
-        let mut table_names: HashSet<String> = HashSet::new();
-        for table_name in all_tables {
-            table_names.insert(table_name.to_string());
-        }
-
-        Ok(HMSSchema {
-            config: config.clone(),
-            schema_name: schema_name.to_string(),
-            table_names,
-        })
-    }
 }
 
 #[async_trait]

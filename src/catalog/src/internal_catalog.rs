@@ -1,15 +1,10 @@
 use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
-use crate::glue_catalog::GlueCatalog;
-use crate::hms_catalog::HMSCatalog;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::catalog::streaming::StreamingTable;
-use datafusion::catalog::{
-    AsyncCatalogProvider, AsyncSchemaProvider
-    , TableProvider,
-};
+use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, TableProvider};
 use datafusion::common::Result;
 use datafusion::config::ConfigEntry;
 use datafusion::error::DataFusionError;
@@ -38,13 +33,7 @@ pub struct InternalCatalog {
 
 impl InternalCatalog {
     pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        Self {
-            catalog_manager,
-        }
-    }
-
-    fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<StreamingTable> {
-        StreamingTable::try_new(table.schema().clone(), vec![table])
+        Self { catalog_manager }
     }
 }
 
@@ -56,12 +45,16 @@ impl DobbyDbCatalogProvider for InternalCatalog {
 
     async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>> {
         if schema_name != INFORMATION_SCHEMA {
-            return Err(DataFusionError::Plan(format!("{} schema not exist", schema_name)));
+            return Err(DataFusionError::Plan(format!(
+                "{} schema not exist",
+                schema_name
+            )));
         }
-        Ok(vec![INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
-                INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
-                INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
-                INFORMATION_SCHEMA_SHOW_VARIABLES.to_string()
+        Ok(vec![
+            INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
+            INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
+            INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
+            INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
         ])
     }
 
@@ -112,11 +105,11 @@ impl AsyncSchemaProvider for InformationSchema {
             ))?))
         } else if table_name == INFORMATION_SCHEMA_SHOW_TABLES {
             Ok(Some(wrap_with_stream_table(Arc::new(
-               InformationSchemaShowTables::new(self.catalog_manager.clone()),
+                InformationSchemaShowTables::new(self.catalog_manager.clone()),
             ))?))
         } else if table_name == INFORMATION_SCHEMA_SHOW_VARIABLES {
             Ok(Some(wrap_with_stream_table(Arc::new(
-                InformationSchemaShowVariables::new()
+                InformationSchemaShowVariables::new(),
             ))?))
         } else {
             Ok(None)
@@ -291,7 +284,9 @@ impl PartitionStream for InformationSchemaShowTables {
         Box::pin(RecordBatchStreamAdapter::new(
             Arc::clone(&schema),
             futures::stream::once(async move {
-                let table_names = catalog_manager.list_table_names(&default_catalog, &default_schema).await?;
+                let table_names = catalog_manager
+                    .list_table_names(&default_catalog, &default_schema)
+                    .await?;
                 let mut schema_name_builder = StringBuilder::new();
                 for table_name in table_names {
                     schema_name_builder.append_value(table_name);
@@ -301,7 +296,7 @@ impl PartitionStream for InformationSchemaShowTables {
                     Arc::clone(&schema),
                     vec![Arc::new(schema_name_builder.finish())],
                 )
-                    .map_err(|error| DataFusionError::External(Box::new(error)))
+                .map_err(|error| DataFusionError::External(Box::new(error)))
             }),
         ))
     }

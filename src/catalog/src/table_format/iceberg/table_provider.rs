@@ -23,7 +23,7 @@ pub struct IcebergTableProvider {
 }
 
 impl IcebergTableProvider {
-    pub async fn try_new_from_table(table: Table, storage: Option<Storage>) -> Result<Self> {
+    pub fn try_new_from_table(table: Table, storage: Option<Storage>) -> Result<Self> {
         let schema = Arc::new(
             schema_to_arrow_schema(table.metadata().current_schema())
                 .map_err(|e| DataFusionError::External(Box::new(e)))?,

@@ -66,13 +66,7 @@ impl IcebergTableProviderFactory {
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_name)?;
             Ok(Arc::new(metadata_table_provider))
         } else {
-            // using iceberg official sdk
-            // let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table)
-            //     .await
-            //     .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            // Ok(Arc::new(iceberg_table))
-            let iceberg_table =
-                IcebergTableProvider::try_new_from_table(iceberg_table, storage).await?;
+            let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table, storage)?;
             Ok(Arc::new(iceberg_table))
         }
     }

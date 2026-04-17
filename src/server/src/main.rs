@@ -8,9 +8,9 @@ use datafusion_cli::object_storage::instrumented::{
 };
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
+use dobbydb_sql::DobbyDbContext;
 use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
-use dobbydb_sql::DobbyDbContext;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -56,7 +56,7 @@ async fn async_main(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> 
         color: true,
         instrumented_registry: instrumented_registry.clone(),
     };
-    let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env)?;
+    let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env);
     let commands = args.command;
     if commands.is_empty() {
         exec::exec_from_repl(&session_context, &print_options).await;
@@ -78,6 +78,7 @@ fn parse_command(command: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    #[allow(clippy::unused_async)]
     #[tokio::test]
     async fn test_server() -> Result<()> {
         // let args = DobbyDBArgs {

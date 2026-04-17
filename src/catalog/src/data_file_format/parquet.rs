@@ -4,19 +4,18 @@ use datafusion::datasource::physical_plan::{ParquetFileMetrics, ParquetFileReade
 use datafusion::object_store::ObjectStore;
 use datafusion::parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader};
 use datafusion::physical_expr_common::metrics::ExecutionPlanMetricsSet;
-use dobbydb_common::runtime::get_runtime_manager;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
 #[derive(Debug)]
 pub struct ExtendedParquetFileReaderFactory {
-    store: Arc<dyn ObjectStore>,
     io_handle: Handle,
+    store: Arc<dyn ObjectStore>,
 }
 
 impl ExtendedParquetFileReaderFactory {
     pub fn new(store: Arc<dyn ObjectStore>) -> Self {
-        let io_handle = get_runtime_manager().read().unwrap().io_handle();
+        let io_handle = Handle::current();
         Self { store, io_handle }
     }
 }

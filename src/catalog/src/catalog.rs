@@ -27,6 +27,12 @@ pub struct CatalogManager {
     catalogs: HashMap<String, CatalogConfig>,
 }
 
+impl Default for CatalogManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CatalogManager {
     pub fn new() -> Self {
         let mut catalogs = HashMap::new();
@@ -89,9 +95,7 @@ impl CatalogManager {
             .ok_or_else(|| DataFusionError::Plan(format!("unknown catalog {}", catalog_name)))?;
 
         match catalog_config {
-            CatalogConfig::Internal => {
-                Ok(Box::new(InternalCatalog::new(Arc::new(self.clone()))))
-            }
+            CatalogConfig::Internal => Ok(Box::new(InternalCatalog::new(Arc::new(self.clone())))),
             CatalogConfig::HMS(hms_catalog) => {
                 Ok(Box::new(HMSCatalog::new(&Arc::new(hms_catalog.clone()))))
             }
@@ -111,7 +115,11 @@ impl CatalogManager {
             .await
     }
 
-    pub async fn list_table_names(&self, catalog_name: &str, schema_name: &str) -> Result<Vec<String>> {
+    pub async fn list_table_names(
+        &self,
+        catalog_name: &str,
+        schema_name: &str,
+    ) -> Result<Vec<String>> {
         self.build_catalog_provider(catalog_name)?
             .list_table_names(schema_name)
             .await
@@ -123,7 +131,12 @@ impl CatalogManager {
             .await
     }
 
-    pub async fn table_exists(&self, catalog_name: &str, schema_name: &str, table_name: &str) -> Result<bool> {
+    pub async fn table_exists(
+        &self,
+        catalog_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<bool> {
         self.build_catalog_provider(catalog_name)?
             .table_exist(table_name, schema_name)
             .await
