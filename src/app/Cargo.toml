@@ -1,0 +1,28 @@
+[package]
+name = "dobbydb-app"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+rustyline = "17.0.2"
+clap = { version = "4.5.48", features = ["derive"] }
+datafusion = { workspace = true }
+datafusion-cli = { workspace = true }
+sqlparser = { workspace = true }
+tokio = { workspace = true }
+dobbydb-common = { workspace = true }
+dobbydb-storage = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+iceberg = { workspace = true }
+iceberg-datafusion = { workspace = true }
+iceberg-storage-opendal = { workspace = true }
+deltalake = { workspace = true }
+deltalake-aws = { workspace = true }
+volo-thrift = "0.10.8"
+aws-sdk-glue = "1.122.0"
+aws-config = "1.8.7"
+hive_metastore = "0.2.0"
+url = { workspace = true }

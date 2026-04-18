@@ -5,10 +5,8 @@ edition = "2024"
 [workspace]
 resolver = "2"
 members = [
-    "src/catalog",
+    "src/app",
     "src/common",
-    "src/server",
-    "src/sql",
     "src/storage"
 ]
 
@@ -28,8 +26,6 @@ iceberg-datafusion = "0.9.0"
 iceberg-storage-opendal = { version = "0.9.0", default-features = false, features = ["opendal-s3", "opendal-oss"] }
 deltalake = { version = "0.31.0", features = ["datafusion", "s3"] }
 deltalake-aws = "0.14.0"
-dobbydb-catalog = { path = "src/catalog" }
-dobbydb-server = { path = "src/server" }
-dobbydb-sql = { path = "src/sql" }
+dobbydb-app = { path = "src/app" }
 dobbydb-storage = {path = "src/storage"}
 dobbydb-common = {path = "src/common"}
