@@ -1,4 +1,5 @@
 use crate::catalog::CatalogConfig;
+use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::delta::DeltaTableProviderFactory;
 use crate::table_format::hive::HiveTableProviderFactory;
@@ -14,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct TableProviderBuilder {
+    dobbydb_context: Arc<DobbyDbContext>,
     table_reference: TableReference,
     table_properties: HashMap<String, String>,
     table_format: TableFormat,
@@ -25,6 +27,7 @@ pub struct TableProviderBuilder {
 
 impl TableProviderBuilder {
     pub fn new(
+        dobbydb_context: Arc<DobbyDbContext>,
         table_reference: TableReference,
         table_properties: HashMap<String, String>,
         table_format: TableFormat,
@@ -38,6 +41,7 @@ impl TableProviderBuilder {
             }
         };
         Self {
+            dobbydb_context,
             table_reference,
             table_properties,
             table_format,
@@ -97,10 +101,12 @@ impl TableProviderBuilder {
             }
             TableFormat::Hive => match (self.hive_storage_info, self.hive_partitions) {
                 (Some(storage_info), Some(partitions)) => {
+                    let io_handle = self.dobbydb_context.runtime_manager.io_handle();
                     HiveTableProviderFactory::try_create_table_provider(
                         storage_info,
                         partitions,
                         self.storage,
+                        io_handle,
                     )
                 }
                 _ => Err(DataFusionError::Internal(

@@ -14,8 +14,7 @@ pub struct ExtendedParquetFileReaderFactory {
 }
 
 impl ExtendedParquetFileReaderFactory {
-    pub fn new(store: Arc<dyn ObjectStore>) -> Self {
-        let io_handle = Handle::current();
+    pub fn new(store: Arc<dyn ObjectStore>, io_handle: Handle) -> Self {
         Self { store, io_handle }
     }
 }

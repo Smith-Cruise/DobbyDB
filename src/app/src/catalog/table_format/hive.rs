@@ -10,6 +10,7 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use dobbydb_storage::storage::Storage;
 use std::sync::Arc;
+use tokio::runtime::Handle;
 
 pub struct HiveTableProviderFactory {}
 
@@ -18,8 +19,9 @@ impl HiveTableProviderFactory {
         info: HiveStorageInfo,
         partitions: Vec<HivePartition>,
         storage: Option<Storage>,
+        io_handle: Handle,
     ) -> Result<Arc<dyn TableProvider>> {
-        let provider = HiveTableProvider::new(info, partitions, storage);
+        let provider = HiveTableProvider::new(info, partitions, storage, io_handle);
         Ok(Arc::new(provider))
     }
 }

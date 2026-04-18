@@ -1,3 +1,4 @@
+use crate::context::DobbyDbContext;
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
 use crate::internal_catalog::{INTERNAL_CATALOG, InternalCatalog};
@@ -5,10 +6,10 @@ use async_trait::async_trait;
 use datafusion::catalog::{AsyncCatalogProvider, AsyncCatalogProviderList};
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
+use dobbydb_common::runtime::RuntimeManager;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::DobbyDbContext;
 
 #[derive(Serialize, Deserialize)]
 pub struct CatalogConfigs {
@@ -95,15 +96,21 @@ impl CatalogManager {
         let catalog_config = self
             .get_catalog(catalog_name)
             .ok_or_else(|| DataFusionError::Plan(format!("unknown catalog {}", catalog_name)))?;
+        let dobbydb_context = Arc::new(DobbyDbContext {
+            catalog_manager: Arc::new(self.clone()),
+            runtime_manager: Arc::new(RuntimeManager::default()),
+        });
 
         match catalog_config {
-            CatalogConfig::Internal => Ok(Box::new(InternalCatalog::new(Arc::new(self.clone())))),
-            CatalogConfig::HMS(hms_catalog) => {
-                Ok(Box::new(HMSCatalog::new(&Arc::new(hms_catalog.clone()))))
-            }
-            CatalogConfig::GLUE(glue_catalog) => {
-                Ok(Box::new(GlueCatalog::new(&Arc::new(glue_catalog.clone()))))
-            }
+            CatalogConfig::Internal => Ok(Box::new(InternalCatalog::new(dobbydb_context))),
+            CatalogConfig::HMS(hms_catalog) => Ok(Box::new(HMSCatalog::new(
+                dobbydb_context,
+                Arc::new(hms_catalog.clone()),
+            ))),
+            CatalogConfig::GLUE(glue_catalog) => Ok(Box::new(GlueCatalog::new(
+                dobbydb_context,
+                Arc::new(glue_catalog.clone()),
+            ))),
         }
     }
 
@@ -146,7 +153,7 @@ impl CatalogManager {
 }
 
 pub struct DobbyDbCatalogProviderList {
-    dobbydb_context: Arc<DobbyDbContext>
+    dobbydb_context: Arc<DobbyDbContext>,
 }
 
 impl DobbyDbCatalogProviderList {
@@ -158,24 +165,28 @@ impl DobbyDbCatalogProviderList {
 #[async_trait]
 impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
     async fn catalog(&self, catalog_name: &str) -> Result<Option<Arc<dyn AsyncCatalogProvider>>> {
-        let catalog_manager = self.dobbydb_context.catalog_manager.clone();
-        let catalog_config =
-            if let Some(catalog_config) = catalog_manager.get_catalog(catalog_name) {
-                catalog_config.clone()
-            } else {
-                return Ok(None);
-            };
+        let catalog_config = if let Some(catalog_config) = self
+            .dobbydb_context
+            .catalog_manager
+            .get_catalog(catalog_name)
+        {
+            catalog_config.clone()
+        } else {
+            return Ok(None);
+        };
 
         match catalog_config {
-            CatalogConfig::Internal => Ok(Some(Arc::new(InternalCatalog::new(
-                catalog_manager,
+            CatalogConfig::Internal => Ok(Some(Arc::new(
+                crate::internal_catalog::InternalCatalog::new(self.dobbydb_context.clone()),
+            ))),
+            CatalogConfig::HMS(hms_catalog) => Ok(Some(Arc::new(HMSCatalog::new(
+                self.dobbydb_context.clone(),
+                Arc::new(hms_catalog),
             )))),
-            CatalogConfig::HMS(hms_catalog) => {
-                Ok(Some(Arc::new(HMSCatalog::new(&Arc::new(hms_catalog)))))
-            }
-            CatalogConfig::GLUE(glue_catalog) => {
-                Ok(Some(Arc::new(GlueCatalog::new(&Arc::new(glue_catalog)))))
-            }
+            CatalogConfig::GLUE(glue_catalog) => Ok(Some(Arc::new(GlueCatalog::new(
+                self.dobbydb_context.clone(),
+                Arc::new(glue_catalog),
+            )))),
         }
     }
 }

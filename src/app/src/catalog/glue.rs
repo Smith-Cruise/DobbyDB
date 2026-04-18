@@ -1,4 +1,5 @@
 use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
+use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
@@ -47,36 +48,46 @@ async fn build_glue_client(config: &GlueCatalogConfig) -> Client {
     Client::new(&aws_config)
 }
 
-#[derive(Debug)]
 pub struct GlueCatalog {
+    dobbydb_context: Arc<DobbyDbContext>,
     config: Arc<GlueCatalogConfig>,
 }
 
 impl GlueCatalog {
-    pub fn new(config: &Arc<GlueCatalogConfig>) -> Self {
+    pub fn new(dobbydb_context: Arc<DobbyDbContext>, config: Arc<GlueCatalogConfig>) -> Self {
         Self {
-            config: config.clone(),
+            dobbydb_context,
+            config,
         }
     }
 }
 #[async_trait]
 impl AsyncCatalogProvider for GlueCatalog {
     async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
-        Ok(Some(Arc::new(GlueSchema::new(&self.config, schema_name))))
+        Ok(Some(Arc::new(GlueSchema::new(
+            self.dobbydb_context.clone(),
+            self.config.clone(),
+            schema_name.to_string(),
+        ))))
     }
 }
 
-#[derive(Debug)]
 pub struct GlueSchema {
+    dobbydb_context: Arc<DobbyDbContext>,
     config: Arc<GlueCatalogConfig>,
     schema_name: String,
 }
 
 impl GlueSchema {
-    pub fn new(config: &Arc<GlueCatalogConfig>, schema_name: &str) -> Self {
+    pub fn new(
+        dobbydb_context: Arc<DobbyDbContext>,
+        config: Arc<GlueCatalogConfig>,
+        schema_name: String,
+    ) -> Self {
         Self {
-            config: config.clone(),
-            schema_name: schema_name.to_string(),
+            dobbydb_context,
+            config,
+            schema_name,
         }
     }
 }
@@ -166,6 +177,7 @@ impl AsyncSchemaProvider for GlueSchema {
         };
 
         let table_provider_builder = TableProviderBuilder::new(
+            self.dobbydb_context.clone(),
             table_reference,
             glue_table_properties,
             table_format,

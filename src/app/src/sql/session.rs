@@ -136,8 +136,7 @@ impl ExtendedSessionContext {
         let references = state.resolve_table_references(&statement)?;
         // Now we can asynchronously resolve the table references to get a cached catalog
         // that we can use for our query
-        let catalog_provider_list =
-            DobbyDbCatalogProviderList::new(self.dobbydb_context.catalog_manager.clone());
+        let catalog_provider_list = DobbyDbCatalogProviderList::new(self.dobbydb_context.clone());
         let resolved_catalog_providers = catalog_provider_list
             .resolve(&references, state.config())
             .await?;

@@ -38,6 +38,7 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
+use tokio::runtime::Handle;
 use url::Url;
 
 #[derive(Debug)]
@@ -45,6 +46,7 @@ pub struct HiveTableProvider {
     hive_storage_info: HiveStorageInfo,
     partitions: Vec<HivePartition>,
     storage: Option<Storage>,
+    io_handle: Handle,
 }
 
 impl HiveTableProvider {
@@ -52,11 +54,13 @@ impl HiveTableProvider {
         hive_storage_info: HiveStorageInfo,
         partitions: Vec<HivePartition>,
         storage: Option<Storage>,
+        io_handle: Handle,
     ) -> Self {
         Self {
             hive_storage_info,
             partitions,
             storage,
+            io_handle,
         }
     }
 }
@@ -150,6 +154,7 @@ impl TableProvider for HiveTableProvider {
                 limit,
             ),
             HiveInputFormat::Parquet => build_parquet_exec(
+                self.io_handle.clone(),
                 store_url,
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
@@ -322,6 +327,7 @@ fn detect_file_group_compression(file_group: &FileGroup) -> Result<CompressionTy
 
 #[allow(clippy::too_many_arguments)]
 fn build_parquet_exec(
+    io_handle: Handle,
     store_url: ObjectStoreUrl,
     table_schema: TableSchema,
     file_group: FileGroup,
@@ -337,8 +343,10 @@ fn build_parquet_exec(
 
     let store = state.runtime_env().object_store(&store_url)?;
 
-    let parquet_file_reader_factory =
-        Arc::new(ExtendedParquetFileReaderFactory::new(store.clone()));
+    let parquet_file_reader_factory = Arc::new(ExtendedParquetFileReaderFactory::new(
+        store.clone(),
+        io_handle,
+    ));
 
     let mut source = ParquetSource::new(table_schema)
         .with_table_parquet_options(parquet_options)

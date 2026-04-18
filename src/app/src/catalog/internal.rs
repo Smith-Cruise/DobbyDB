@@ -1,4 +1,5 @@
 use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
+use crate::context::DobbyDbContext;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -26,14 +27,13 @@ pub fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<Arc<Str
     )?))
 }
 
-#[derive(Debug)]
 pub struct InternalCatalog {
-    catalog_manager: Arc<CatalogManager>,
+    dobbydb_context: Arc<DobbyDbContext>,
 }
 
 impl InternalCatalog {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        Self { catalog_manager }
+    pub fn new(dobbydb_context: Arc<DobbyDbContext>) -> Self {
+        Self { dobbydb_context }
     }
 }
 
@@ -74,7 +74,7 @@ impl AsyncCatalogProvider for InternalCatalog {
     async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
         if schema_name == INFORMATION_SCHEMA {
             Ok(Some(Arc::new(InformationSchema::new(
-                self.catalog_manager.clone(),
+                self.dobbydb_context.catalog_manager.clone(),
             ))))
         } else {
             Ok(None)
