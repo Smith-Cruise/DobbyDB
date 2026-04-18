@@ -63,6 +63,7 @@ impl TableProviderBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn table_format(&self) -> &TableFormat {
         &self.table_format
     }

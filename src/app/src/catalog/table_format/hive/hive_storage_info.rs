@@ -7,6 +7,7 @@ use hive_metastore::{FieldSchema, Table as HMSTable};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub enum HiveInputFormat {
     TextFile,

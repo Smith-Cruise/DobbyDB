@@ -1,11 +1,7 @@
+use crate::catalog::CatalogManager;
 use datafusion::common::Result;
-use dobbydb_catalog::catalog::CatalogManager;
 use dobbydb_common::runtime::RuntimeManager;
 use std::sync::Arc;
-
-pub mod parser;
-pub mod session;
-pub mod statements;
 
 pub struct DobbyDbContext {
     pub catalog_manager: Arc<CatalogManager>,

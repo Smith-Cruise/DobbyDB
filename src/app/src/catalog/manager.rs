@@ -15,6 +15,7 @@ pub struct CatalogConfigs {
     pub glue: Option<Vec<GlueCatalogConfig>>,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
 pub enum CatalogConfig {
     Internal,

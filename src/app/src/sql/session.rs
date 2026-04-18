@@ -1,4 +1,9 @@
-use crate::DobbyDbContext;
+use crate::catalog::{
+    CatalogManager, DobbyDbCatalogProviderList, INFORMATION_SCHEMA_SHOW_CATALOGS,
+    INFORMATION_SCHEMA_SHOW_SCHEMAS, INFORMATION_SCHEMA_SHOW_TABLES,
+    INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
+};
+use crate::context::DobbyDbContext;
 use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 use datafusion::catalog::AsyncCatalogProviderList;
@@ -13,11 +18,6 @@ use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
 use datafusion::prelude::{SessionConfig, SessionContext};
-use dobbydb_catalog::catalog::{CatalogManager, DobbyDbCatalogProviderList};
-use dobbydb_catalog::internal_catalog::{
-    INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
-    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
-};
 use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -67,16 +67,18 @@ pub struct ExtendedSessionContext {
     session_context: SessionContext,
 }
 
-impl ExtendedSessionContext {
-    pub fn default() -> Self {
+impl Default for ExtendedSessionContext {
+    fn default() -> Self {
         let dobbydb_context = Arc::new(DobbyDbContext {
             catalog_manager: Arc::new(CatalogManager::default()),
-            runtime_manager: Arc::new(RuntimeManager::default())
+            runtime_manager: Arc::new(RuntimeManager::default()),
         });
         let runtime_env = Arc::new(RuntimeEnv::default());
         Self::new(dobbydb_context, runtime_env)
     }
+}
 
+impl ExtendedSessionContext {
     pub fn new(dobbydb_context: Arc<DobbyDbContext>, runtime_env: Arc<RuntimeEnv>) -> Self {
         let session_config = SessionConfig::new()
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);

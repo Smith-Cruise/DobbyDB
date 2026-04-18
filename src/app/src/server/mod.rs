@@ -1,5 +1,8 @@
-mod exec;
+pub mod flight;
+pub mod repl;
 
+use crate::context::DobbyDbContext;
+use crate::sql::session::ExtendedSessionContext;
 use clap::Parser;
 use datafusion::common::error::Result;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
@@ -8,8 +11,6 @@ use datafusion_cli::object_storage::instrumented::{
 };
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
-use dobbydb_sql::DobbyDbContext;
-use dobbydb_sql::session::ExtendedSessionContext;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -34,14 +35,14 @@ struct DobbyDbArgs {
     command: Vec<String>,
 }
 
-pub fn main() -> Result<()> {
+pub fn run() -> Result<()> {
     let args = DobbyDbArgs::parse();
     let dobbydb_context = Arc::new(DobbyDbContext::new(Some(&args.config))?);
     let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
-    cpu_handle.block_on(async_main(dobbydb_context.clone(), args))
+    cpu_handle.block_on(async_run(dobbydb_context.clone(), args))
 }
 
-async fn async_main(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> Result<()> {
+async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> Result<()> {
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
@@ -59,9 +60,9 @@ async fn async_main(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> 
     let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env);
     let commands = args.command;
     if commands.is_empty() {
-        exec::exec_from_repl(&session_context, &print_options).await;
+        repl::exec_from_repl(&session_context, &print_options).await;
     } else {
-        exec::exec_from_commands(&session_context, commands, &print_options).await?;
+        repl::exec_from_commands(&session_context, commands, &print_options).await?;
     }
     Ok(())
 }
@@ -71,32 +72,5 @@ fn parse_command(command: &str) -> Result<String, String> {
         Ok(command.to_string())
     } else {
         Err("-c flag expects only non empty commands".to_string())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[allow(clippy::unused_async)]
-    #[tokio::test]
-    async fn test_server() -> Result<()> {
-        // let args = DobbyDBArgs {
-        //     config: "/Users/smith/Software/DobbyDbConfig/catalog.toml".to_string(),
-        // };
-        // let server = DobbyDBServer::new(args);
-        // server.init().await?;
-        // let session_context = ExtendedSessionContext::new().await?;
-        //
-        // // show catalogs
-        // let df = session_context.sql("show catalogs").await?;
-        // let batches = df.collect().await?;
-        // print_batches(batches).await?;
-        //
-        // // show schemas
-        // let df = session_context.sql("show schemas").await?;
-        // let batches = df.collect().await?;
-        // print_batches(batches).await?;
-        Ok(())
     }
 }

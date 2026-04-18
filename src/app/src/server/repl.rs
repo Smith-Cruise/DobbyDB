@@ -1,7 +1,7 @@
+use crate::sql::session::ExtendedSessionContext;
 use datafusion::common::Result;
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::PrintOptions;
-use dobbydb_sql::session::ExtendedSessionContext;
 use futures::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Editor};

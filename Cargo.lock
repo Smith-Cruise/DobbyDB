@@ -2592,13 +2592,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "dobbydb-catalog"
+name = "dobbydb-app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-glue",
+ "clap",
  "datafusion",
+ "datafusion-cli",
  "deltalake",
  "deltalake-aws",
  "dobbydb-common",
@@ -2608,7 +2610,9 @@ dependencies = [
  "iceberg",
  "iceberg-datafusion",
  "iceberg-storage-opendal",
+ "rustyline",
  "serde",
+ "sqlparser",
  "tokio",
  "toml",
  "url",
@@ -2620,34 +2624,6 @@ name = "dobbydb-common"
 version = "0.1.0"
 dependencies = [
  "tokio",
-]
-
-[[package]]
-name = "dobbydb-server"
-version = "0.1.0"
-dependencies = [
- "clap",
- "datafusion",
- "datafusion-cli",
- "dobbydb-catalog",
- "dobbydb-common",
- "dobbydb-sql",
- "futures",
- "rustyline",
- "tokio",
-]
-
-[[package]]
-name = "dobbydb-sql"
-version = "0.1.0"
-dependencies = [
- "datafusion",
- "datafusion-cli",
- "dobbydb-catalog",
- "dobbydb-common",
- "sqlparser",
- "tokio",
- "url",
 ]
 
 [[package]]
