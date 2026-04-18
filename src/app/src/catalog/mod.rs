@@ -1,4 +1,3 @@
-pub(crate) mod constants;
 pub(crate) mod data_file_format;
 pub(crate) mod glue;
 pub(crate) mod hms;

@@ -8,6 +8,7 @@ use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::DobbyDbContext;
 
 #[derive(Serialize, Deserialize)]
 pub struct CatalogConfigs {
@@ -145,20 +146,21 @@ impl CatalogManager {
 }
 
 pub struct DobbyDbCatalogProviderList {
-    catalog_manager: Arc<CatalogManager>,
+    dobbydb_context: Arc<DobbyDbContext>
 }
 
 impl DobbyDbCatalogProviderList {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> DobbyDbCatalogProviderList {
-        Self { catalog_manager }
+    pub fn new(dobbydb_context: Arc<DobbyDbContext>) -> DobbyDbCatalogProviderList {
+        Self { dobbydb_context }
     }
 }
 
 #[async_trait]
 impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
     async fn catalog(&self, catalog_name: &str) -> Result<Option<Arc<dyn AsyncCatalogProvider>>> {
+        let catalog_manager = self.dobbydb_context.catalog_manager.clone();
         let catalog_config =
-            if let Some(catalog_config) = self.catalog_manager.get_catalog(catalog_name) {
+            if let Some(catalog_config) = catalog_manager.get_catalog(catalog_name) {
                 catalog_config.clone()
             } else {
                 return Ok(None);
@@ -166,7 +168,7 @@ impl AsyncCatalogProviderList for DobbyDbCatalogProviderList {
 
         match catalog_config {
             CatalogConfig::Internal => Ok(Some(Arc::new(InternalCatalog::new(
-                self.catalog_manager.clone(),
+                catalog_manager,
             )))),
             CatalogConfig::HMS(hms_catalog) => {
                 Ok(Some(Arc::new(HMSCatalog::new(&Arc::new(hms_catalog)))))
