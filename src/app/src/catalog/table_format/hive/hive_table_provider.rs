@@ -87,7 +87,7 @@ impl TableProvider for HiveTableProvider {
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         if let Some(storage) = &self.storage {
-            storage.register_into_session(&self.hive_storage_info.table_location, state)?;
+            storage.try_register_into_session(&self.hive_storage_info.table_location, state)?;
         }
 
         let (path_schema, path_bucket) =

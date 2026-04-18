@@ -16,6 +16,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
+pub const S3_SCHEMA: &str = "s3";
+pub const S3A_SCHEMA: &str = "s3a";
+pub const OSS_SCHEMA: &str = "oss";
+
 pub trait StorageTrait {
     fn build_object_store(
         &self,
@@ -32,7 +36,7 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn register_into_session(
+    pub fn try_register_into_session(
         &self,
         table_location: impl Into<String>,
         session: &dyn Session,
@@ -44,17 +48,28 @@ impl Storage {
             .map_err(|e| DataFusionError::External(e.into()))?;
 
         let registry = &session.runtime_env().object_store_registry;
-        if let Some(s3_storage) = &self.s3_storage {
-            registry.register_store(
-                &object_store_path,
-                s3_storage.build_object_store(&path_bucket)?,
-            );
+        if registry.get_store(&object_store_path).is_ok() {
+            return Ok(());
         }
-        if let Some(oss_storage) = &self.oss_storage {
-            registry.register_store(
-                &object_store_path,
-                oss_storage.build_object_store(&path_bucket)?,
-            );
+
+        match path_schema.as_str() {
+            S3_SCHEMA | S3A_SCHEMA => {
+                if let Some(s3_storage) = &self.s3_storage {
+                    registry.register_store(
+                        &object_store_path,
+                        s3_storage.build_object_store(&path_bucket)?,
+                    );
+                }
+            }
+            OSS_SCHEMA => {
+                if let Some(oss_storage) = &self.oss_storage {
+                    registry.register_store(
+                        &object_store_path,
+                        oss_storage.build_object_store(&path_bucket)?,
+                    );
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
