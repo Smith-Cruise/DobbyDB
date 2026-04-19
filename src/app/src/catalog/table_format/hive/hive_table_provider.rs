@@ -764,6 +764,7 @@ mod tests {
     use datafusion::arrow::datatypes::Field;
     use datafusion::logical_expr::expr::InList;
     use datafusion::logical_expr::{Expr, Operator, binary_expr, col, lit};
+    use datafusion::object_store::ObjectStoreExt;
     use datafusion::object_store::memory::InMemory;
     use datafusion::prelude::SessionContext;
     use std::collections::HashMap;

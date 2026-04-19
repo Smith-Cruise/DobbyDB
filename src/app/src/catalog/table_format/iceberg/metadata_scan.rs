@@ -6,21 +6,22 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
 use futures::TryStreamExt;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct IcebergMetadataScan {
     provider: IcebergMetadataTableProvider,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl IcebergMetadataScan {
     pub fn new(provider: IcebergMetadataTableProvider) -> Self {
-        let properties = PlanProperties::new(
+        let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(provider.schema()),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
         Self {
             provider,
             properties,
@@ -47,7 +48,7 @@ impl ExecutionPlan for IcebergMetadataScan {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 

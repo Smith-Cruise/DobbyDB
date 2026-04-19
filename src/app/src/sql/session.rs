@@ -13,7 +13,7 @@ use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::LogicalPlanBuilder;
+use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
 use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
@@ -21,6 +21,7 @@ use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
+use datafusion::config::ConfigOptions;
 
 static SESSION_MANAGER: OnceLock<RwLock<HashMap<i64, Arc<SessionContext>>>> = OnceLock::new();
 
@@ -80,7 +81,9 @@ impl Default for ExtendedSessionContext {
 
 impl ExtendedSessionContext {
     pub fn new(dobbydb_context: Arc<DobbyDbContext>, runtime_env: Arc<RuntimeEnv>) -> Self {
-        let session_config = SessionConfig::new()
+        let mut options = ConfigOptions::new();
+        options.explain.format = ExplainFormat::Tree;
+        let session_config = SessionConfig::from(options)
             .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
         Self {
@@ -345,7 +348,7 @@ mod tests {
     use datafusion::execution::runtime_env::RuntimeEnvBuilder;
     use datafusion::object_store::memory::InMemory;
     use datafusion::object_store::path::Path;
-    use datafusion::object_store::{ObjectStore, PutPayload};
+    use datafusion::object_store::{ObjectStoreExt, PutPayload};
     use datafusion::prelude::CsvReadOptions;
     use datafusion_cli::object_storage::instrumented::{
         InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,

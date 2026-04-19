@@ -17,7 +17,6 @@ toml = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 iceberg = { workspace = true }
-iceberg-datafusion = { workspace = true }
 iceberg-storage-opendal = { workspace = true }
 deltalake = { workspace = true }
 deltalake-aws = { workspace = true }

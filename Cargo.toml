@@ -11,9 +11,9 @@ members = [
 ]
 
 [workspace.dependencies]
-datafusion = "52.1.0"
-datafusion-cli = "52.1.0"
-sqlparser = "0.59.0"
+datafusion = "53.1.0"
+datafusion-cli = "53.1.0"
+sqlparser = "0.61.0"
 tokio = { version = "1.0", features = ["rt-multi-thread", "tracing", "rt"] }
 console-subscriber = "0.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -21,11 +21,10 @@ toml = "0.9.5"
 futures = "0.3.31"
 async-trait = "0.1.88"
 url = "2.5.7"
-iceberg = "0.9.0"
-iceberg-datafusion = "0.9.0"
-iceberg-storage-opendal = { version = "0.9.0", default-features = false, features = ["opendal-s3", "opendal-oss"] }
-deltalake = { version = "0.31.0", features = ["datafusion", "s3"] }
-deltalake-aws = "0.14.0"
+iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
+iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a", default-features = false, features = ["opendal-s3", "opendal-oss"] }
+deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "0f68868d1dbbe77fa4e99c96df49ae121f8974e4", features = ["datafusion", "s3"] }
+deltalake-aws = { git = "https://github.com/delta-io/delta-rs.git", rev = "0f68868d1dbbe77fa4e99c96df49ae121f8974e4" }
 dobbydb-app = { path = "src/app" }
 dobbydb-storage = {path = "src/storage"}
 dobbydb-common = {path = "src/common"}
