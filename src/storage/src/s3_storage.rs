@@ -3,7 +3,6 @@ use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::object_store::ObjectStore;
 use opendal::Operator;
-use opendal::layers::RetryLayer;
 use opendal::services::S3;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -37,7 +36,6 @@ impl StorageTrait for S3Storage {
         }
         let op = Operator::new(builder)
             .map_err(|err| DataFusionError::External(Box::new(err)))?
-            .layer(RetryLayer::new())
             .finish();
         Ok(Arc::new(object_store_opendal::OpendalStore::new(op)))
     }
