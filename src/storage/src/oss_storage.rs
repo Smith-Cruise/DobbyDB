@@ -2,8 +2,7 @@ use crate::storage::StorageTrait;
 use datafusion::common::DataFusionError;
 use datafusion::common::Result;
 use datafusion::object_store::ObjectStore;
-use opendal::Operator;
-use opendal::services::Oss;
+use datafusion::object_store::aws::AmazonS3Builder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -19,19 +18,22 @@ pub struct OSSStorage {
 
 impl StorageTrait for OSSStorage {
     fn build_object_store(&self, bucket_name: &str) -> Result<Arc<dyn ObjectStore>> {
-        let mut builder = Oss::default().bucket(bucket_name);
+        let mut builder = AmazonS3Builder::new().with_bucket_name(bucket_name);
         if let Some(endpoint) = &self.endpoint {
-            builder = builder.endpoint(endpoint);
+            builder = builder.with_endpoint(endpoint);
+            if endpoint.starts_with("http://") {
+                builder = builder.with_allow_http(true);
+            }
         }
         if let Some(access_key) = &self.access_key {
-            builder = builder.access_key_id(access_key);
+            builder = builder.with_access_key_id(access_key);
         }
         if let Some(secret_key) = &self.secret_key {
-            builder = builder.access_key_secret(secret_key);
+            builder = builder.with_secret_access_key(secret_key);
         }
-        let op = Operator::new(builder)
-            .map_err(|err| DataFusionError::External(Box::new(err)))?
-            .finish();
-        Ok(Arc::new(object_store_opendal::OpendalStore::new(op)))
+        builder
+            .build()
+            .map(|store| Arc::new(store) as Arc<dyn ObjectStore>)
+            .map_err(|err| DataFusionError::External(Box::new(err)))
     }
 }

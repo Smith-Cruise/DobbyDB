@@ -72,7 +72,7 @@ impl TableProvider for IcebergTableProvider {
             ))?
         };
         if let Some(storage) = &self.storage {
-            storage.register_into_session(metadata_location, state)?;
+            storage.try_register_into_session(metadata_location, state)?;
         }
         builder = builder
             .with_snapshot_id(self.snapshot_id)

@@ -4,7 +4,7 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
-use dobbydb_storage::storage::Storage;
+use dobbydb_storage::storage::{OSS_SCHEMA, S3_SCHEMA, S3A_SCHEMA, Storage};
 use iceberg::io::{FileIO, FileIOBuilder, LocalFsStorageFactory};
 use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
@@ -86,11 +86,10 @@ fn build_file_io(
                 .with_props(file_io_properties)
                 .build());
         }
-        "s3" | "s3a" => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
-            configured_scheme: scheme.to_string(),
+        S3_SCHEMA | S3A_SCHEMA => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
             customized_credential_load: None,
         })),
-        "oss" => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Oss)),
+        OSS_SCHEMA => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Oss)),
         _ => {
             return Err(DataFusionError::NotImplemented(format!(
                 "unsupported iceberg storage scheme: {scheme}"

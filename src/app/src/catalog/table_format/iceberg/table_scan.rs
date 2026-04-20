@@ -18,7 +18,6 @@ use dobbydb_storage::storage::parse_location_schema_bucket;
 use futures::StreamExt;
 use iceberg::spec::DataFileFormat;
 use iceberg::table::Table;
-use iceberg_datafusion::to_datafusion_error;
 use std::any::Any;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -86,12 +85,13 @@ impl<'a> IcebergTableScanBuilder<'a> {
             iceberg_table_scan_builder = iceberg_table_scan_builder.with_filter(predicates)
         }
 
-        let mut iceberg_file_scan_tasks = iceberg_table_scan_builder
+        let table_scan = iceberg_table_scan_builder
             .build()
-            .map_err(to_datafusion_error)?
+            .map_err(|error| DataFusionError::External(error.into()))?;
+        let mut iceberg_file_scan_tasks = table_scan
             .plan_files()
             .await
-            .map_err(to_datafusion_error)?;
+            .map_err(|error| DataFusionError::External(error.into()))?;
 
         let mut partition_fields: Vec<PartitionedFile> = Vec::new();
 
@@ -136,7 +136,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
                     partition_fields.push(partition_field);
                 }
                 Err(e) => {
-                    return Err(to_datafusion_error(e));
+                    return Err(DataFusionError::External(e.into()));
                 }
             }
         }
@@ -218,7 +218,7 @@ impl ExecutionPlan for IcebergTableScan {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         self.parquet_scan.properties()
     }
 
