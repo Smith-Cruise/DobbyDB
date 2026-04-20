@@ -26,6 +26,12 @@ struct DobbyDbArgs {
     )]
     object_store_profiling: InstrumentedObjectStoreMode,
 
+    #[clap(long, help = "Specify the default catalog name")]
+    default_catalog: Option<String>,
+
+    #[clap(long, help = "Specify the default schema name")]
+    default_schema: Option<String>,
+
     #[clap(
         long,
         num_args = 0..,
@@ -37,7 +43,10 @@ struct DobbyDbArgs {
 
 pub fn run() -> Result<()> {
     let args = DobbyDbArgs::parse();
-    let dobbydb_context = Arc::new(DobbyDbContext::new(Some(&args.config))?);
+    let mut dobbydb_context = DobbyDbContext::new(Some(&args.config))?;
+    dobbydb_context.default_catalog = args.default_catalog.clone();
+    dobbydb_context.default_schema = args.default_schema.clone();
+    let dobbydb_context = Arc::new(dobbydb_context);
     let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
     cpu_handle.block_on(async_run(dobbydb_context.clone(), args))
 }

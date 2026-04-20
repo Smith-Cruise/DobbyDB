@@ -6,6 +6,8 @@ use std::sync::Arc;
 pub struct DobbyDbContext {
     pub catalog_manager: Arc<CatalogManager>,
     pub runtime_manager: Arc<RuntimeManager>,
+    pub default_catalog: Option<String>,
+    pub default_schema: Option<String>,
 }
 
 impl Default for DobbyDbContext {
@@ -24,6 +26,8 @@ impl DobbyDbContext {
         Ok(Self {
             catalog_manager: Arc::new(catalog_manager),
             runtime_manager: Arc::new(runtime_manager),
+            default_catalog: None,
+            default_schema: None,
         })
     }
 }

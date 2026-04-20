@@ -99,6 +99,8 @@ impl CatalogManager {
         let dobbydb_context = Arc::new(DobbyDbContext {
             catalog_manager: Arc::new(self.clone()),
             runtime_manager: Arc::new(RuntimeManager::default()),
+            default_catalog: None,
+            default_schema: None,
         });
 
         match catalog_config {

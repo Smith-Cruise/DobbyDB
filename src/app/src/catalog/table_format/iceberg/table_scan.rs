@@ -88,11 +88,10 @@ impl<'a> IcebergTableScanBuilder<'a> {
         let table_scan = iceberg_table_scan_builder
             .build()
             .map_err(|error| DataFusionError::External(error.into()))?;
-        let mut iceberg_file_scan_tasks =
-            table_scan
-                .plan_files()
-                .await
-                .map_err(|error| DataFusionError::External(error.into()))?;
+        let mut iceberg_file_scan_tasks = table_scan
+            .plan_files()
+            .await
+            .map_err(|error| DataFusionError::External(error.into()))?;
 
         let mut partition_fields: Vec<PartitionedFile> = Vec::new();
 

@@ -9,19 +9,19 @@ use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
 use datafusion::catalog::AsyncCatalogProviderList;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::common::Result;
+use datafusion::config::ConfigOptions;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
-use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
 use datafusion::logical_expr::sqlparser::ast::{
     ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
+use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
-use datafusion::config::ConfigOptions;
 
 static SESSION_MANAGER: OnceLock<RwLock<HashMap<i64, Arc<SessionContext>>>> = OnceLock::new();
 
@@ -73,6 +73,8 @@ impl Default for ExtendedSessionContext {
         let dobbydb_context = Arc::new(DobbyDbContext {
             catalog_manager: Arc::new(CatalogManager::default()),
             runtime_manager: Arc::new(RuntimeManager::default()),
+            default_catalog: None,
+            default_schema: None,
         });
         let runtime_env = Arc::new(RuntimeEnv::default());
         Self::new(dobbydb_context, runtime_env)
@@ -81,10 +83,18 @@ impl Default for ExtendedSessionContext {
 
 impl ExtendedSessionContext {
     pub fn new(dobbydb_context: Arc<DobbyDbContext>, runtime_env: Arc<RuntimeEnv>) -> Self {
+        let catalog = dobbydb_context
+            .default_catalog
+            .as_deref()
+            .unwrap_or(INTERNAL_CATALOG);
+        let schema = dobbydb_context
+            .default_schema
+            .as_deref()
+            .unwrap_or(INFORMATION_SCHEMA);
         let mut options = ConfigOptions::new();
         options.explain.format = ExplainFormat::Tree;
-        let session_config = SessionConfig::from(options)
-            .with_default_catalog_and_schema(INTERNAL_CATALOG, INFORMATION_SCHEMA);
+        let session_config =
+            SessionConfig::from(options).with_default_catalog_and_schema(catalog, schema);
         let session_context = SessionContext::new_with_config_rt(session_config, runtime_env);
         Self {
             session_context,
