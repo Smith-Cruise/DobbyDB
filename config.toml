@@ -7,3 +7,4 @@ s3-storage = { region = "us-west-2", access-key = "ak", secret-key = "sk" }
 
 [[hms]]
 name = "hms_1"
+metastore_uri = "127.0.0.1:9087"

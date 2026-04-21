@@ -1,3 +1,4 @@
+pub mod cli_helper;
 pub mod flight;
 pub mod repl;
 
