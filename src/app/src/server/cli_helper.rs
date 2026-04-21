@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
-use datafusion_cli::highlighter::SyntaxHighlighter;
 use datafusion::common::config::Dialect;
+use datafusion_cli::highlighter::SyntaxHighlighter;
 use rustyline::completion::Completer;
 use rustyline::highlight::{CmdKind, Highlighter};
 use rustyline::hint::{Hinter, HistoryHinter};

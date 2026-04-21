@@ -1,11 +1,11 @@
+use super::cli_helper::DobbyDbCliHelper;
 use crate::sql::session::ExtendedSessionContext;
 use datafusion::common::Result;
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::PrintOptions;
 use futures::StreamExt;
-use super::cli_helper::DobbyDbCliHelper;
-use rustyline::error::ReadlineError;
 use rustyline::Editor;
+use rustyline::error::ReadlineError;
 use std::time::Instant;
 use tokio::signal;
 
