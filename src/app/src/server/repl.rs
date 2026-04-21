@@ -3,18 +3,18 @@ use datafusion::common::Result;
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::PrintOptions;
 use futures::StreamExt;
+use super::cli_helper::DobbyDbCliHelper;
 use rustyline::error::ReadlineError;
-use rustyline::{DefaultEditor, Editor};
+use rustyline::Editor;
 use std::time::Instant;
 use tokio::signal;
 
 /// run and execute SQL statements and commands against a context with the given print options
 pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintOptions) {
-    let mut rl: DefaultEditor = Editor::new().expect("created editor");
-    // rl.set_helper(Some(CliHelper::new(
-    //     &ctx.task_ctx().session_config().options().sql_parser.dialect,
-    //     print_options.color,
-    // )));
+    let mut rl = Editor::new().expect("created editor");
+    rl.set_helper(Some(DobbyDbCliHelper::new(
+        &ctx.task_ctx().session_config().options().sql_parser.dialect,
+    )));
     rl.load_history(".history").ok();
 
     let mut sql_buffer = String::new();
