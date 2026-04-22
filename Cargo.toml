@@ -28,3 +28,7 @@ deltalake-aws = { git = "https://github.com/delta-io/delta-rs.git", rev = "0f688
 dobbydb-app = { path = "src/app" }
 dobbydb-storage = {path = "src/storage"}
 dobbydb-common = {path = "src/common"}
+
+[profile.release]
+lto = true
+codegen-units = 1
