@@ -1,5 +1,7 @@
 use super::cli_helper::DobbyDbCliHelper;
+use crate::parser::ExtendedParser;
 use crate::sql::session::ExtendedSessionContext;
+use crate::statements::ExtendedStatement;
 use datafusion::common::Result;
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::PrintOptions;
@@ -55,8 +57,7 @@ pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintO
                     }
 
                     tokio::select! {
-                        // 这里可以添加实际执行 SQL 的逻辑
-                        res = exec_and_print(ctx, print_options, sql) => match res {
+                        res = exec_sql(ctx, print_options, sql) => match res {
                             Ok(_) => {}
                             Err(err) => eprintln!("{err}"),
                         },
@@ -88,22 +89,31 @@ pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintO
 
 pub async fn exec_from_commands(
     ctx: &ExtendedSessionContext,
-    commands: Vec<String>,
+    command: &str,
     print_options: &PrintOptions,
 ) -> Result<()> {
-    for sql in commands {
-        exec_and_print(ctx, print_options, &sql).await?;
-    }
-    Ok(())
+    exec_sql(ctx, print_options, command).await
 }
 
-async fn exec_and_print(
+async fn exec_sql(
     ctx: &ExtendedSessionContext,
     print_options: &PrintOptions,
     sql: &str,
 ) -> Result<()> {
+    let statements = ExtendedParser::parse_sql(sql)?;
+    for statement in &statements {
+        exec_statement(ctx, print_options, statement).await?;
+    }
+    Ok(())
+}
+
+async fn exec_statement(
+    ctx: &ExtendedSessionContext,
+    print_options: &PrintOptions,
+    statement: &ExtendedStatement,
+) -> Result<()> {
     let now = Instant::now();
-    let df = ctx.sql(sql).await?;
+    let df = ctx.create_dataframe(statement).await?;
     let format_options = ctx.task_ctx().session_config().options().format.clone();
     let mut stream = df.execute_stream().await?;
     if print_options.format == PrintFormat::Table {

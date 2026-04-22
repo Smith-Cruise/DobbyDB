@@ -35,11 +35,10 @@ struct DobbyDbArgs {
 
     #[clap(
         long,
-        num_args = 0..,
-        help = "Execute the given command string(s), then exit. Commands are expected to be non empty.",
+        help = "Execute the given command string, then exit. The command is expected to be non empty.",
         value_parser(parse_command)
     )]
-    command: Vec<String>,
+    command: Option<String>,
 }
 
 pub fn run() -> Result<()> {
@@ -68,11 +67,11 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
         instrumented_registry: instrumented_registry.clone(),
     };
     let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env);
-    let commands = args.command;
-    if commands.is_empty() {
-        repl::exec_from_repl(&session_context, &print_options).await;
+    let command = args.command;
+    if let Some(command) = command {
+        repl::exec_from_commands(&session_context, &command, &print_options).await?;
     } else {
-        repl::exec_from_commands(&session_context, commands, &print_options).await?;
+        repl::exec_from_repl(&session_context, &print_options).await;
     }
     Ok(())
 }
@@ -82,5 +81,28 @@ fn parse_command(command: &str) -> Result<String, String> {
         Ok(command.to_string())
     } else {
         Err("-c flag expects only non empty commands".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_parse_single_command() {
+        let args = DobbyDbArgs::try_parse_from([
+            "dobbydb",
+            "--config",
+            "config.toml",
+            "--command",
+            "show catalogs; show variables;",
+        ])
+        .expect("single command should parse");
+
+        assert_eq!(
+            args.command.as_deref(),
+            Some("show catalogs; show variables;")
+        );
     }
 }
