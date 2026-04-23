@@ -12,6 +12,7 @@ use datafusion_cli::object_storage::instrumented::{
 };
 use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Parser, Debug)]
@@ -35,10 +36,19 @@ struct DobbyDbArgs {
 
     #[clap(
         long,
-        help = "Execute the given command string, then exit. The command is expected to be non empty.",
-        value_parser(parse_command)
+        help = "Execute the given command string, then exit. The command is expected to be non empty. Conflicts with --file.",
+        value_parser(parse_command),
+        conflicts_with = "file"
     )]
     command: Option<String>,
+
+    #[clap(
+        long,
+        help = "Execute commands from a file, then exit. The file is expected to exist. Conflicts with --command.",
+        value_parser(parse_file),
+        conflicts_with = "command"
+    )]
+    file: Option<String>,
 }
 
 pub fn run() -> Result<()> {
@@ -68,8 +78,11 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
     };
     let session_context = ExtendedSessionContext::new(dobbydb_context, runtime_env);
     let command = args.command;
+    let file = args.file;
     if let Some(command) = command {
         repl::exec_from_commands(&session_context, &command, &print_options).await?;
+    } else if let Some(file) = file {
+        repl::exec_from_file(&session_context, &file, &print_options).await?;
     } else {
         repl::exec_from_repl(&session_context, &print_options).await;
     }
@@ -84,10 +97,25 @@ fn parse_command(command: &str) -> Result<String, String> {
     }
 }
 
+fn parse_file(file: &str) -> Result<String, String> {
+    if file.is_empty() {
+        return Err("--file expects a non empty file path".to_string());
+    }
+
+    let path = Path::new(file);
+    if path.is_file() {
+        Ok(file.to_string())
+    } else {
+        Err(format!("--file expects an existing file path, got: {file}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
+    use std::fs;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_parse_single_command() {
@@ -104,5 +132,28 @@ mod tests {
             args.command.as_deref(),
             Some("show catalogs; show variables;")
         );
+    }
+
+    #[test]
+    fn test_parse_single_file() {
+        let file = NamedTempFile::new().expect("temp sql file should be created");
+        fs::write(file.path(), "show catalogs;show variables;")
+            .expect("temp sql file should be written");
+        let args = DobbyDbArgs::try_parse_from([
+            "dobbydb",
+            "--config",
+            "config.toml",
+            "--file",
+            file.path()
+                .to_str()
+                .expect("temp sql file path should be valid utf-8"),
+        ])
+        .expect("single file should parse");
+
+        let file_path = file
+            .path()
+            .to_str()
+            .expect("temp sql file path should be valid utf-8");
+        assert_eq!(args.file.as_deref(), Some(file_path));
     }
 }

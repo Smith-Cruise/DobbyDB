@@ -8,6 +8,7 @@ use datafusion_cli::print_options::PrintOptions;
 use futures::StreamExt;
 use rustyline::Editor;
 use rustyline::error::ReadlineError;
+use std::fs;
 use std::time::Instant;
 use tokio::signal;
 
@@ -93,6 +94,15 @@ pub async fn exec_from_commands(
     print_options: &PrintOptions,
 ) -> Result<()> {
     exec_sql(ctx, print_options, command).await
+}
+
+pub async fn exec_from_file(
+    ctx: &ExtendedSessionContext,
+    file_path: &str,
+    print_options: &PrintOptions,
+) -> Result<()> {
+    let sql = fs::read_to_string(file_path)?;
+    exec_sql(ctx, print_options, &sql).await
 }
 
 async fn exec_sql(

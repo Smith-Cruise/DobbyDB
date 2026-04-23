@@ -2698,6 +2698,7 @@ dependencies = [
  "rustyline",
  "serde",
  "sqlparser",
+ "tempfile",
  "tokio",
  "toml",
  "url",
