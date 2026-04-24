@@ -1,3 +1,15 @@
+with revenue0 as (
+  select
+    l_suppkey as supplier_no,
+    sum(l_extendedprice * (1 - l_discount)) as total_revenue
+  from
+    lineitem
+  where
+    l_shipdate >= date '1996-01-01'
+    and l_shipdate < date '1996-04-01'
+  group by
+    l_suppkey
+)
 select
   s_suppkey,
   s_name,
