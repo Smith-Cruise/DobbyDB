@@ -166,7 +166,7 @@ mod tests {
         assert_eq!("us-east-1", &s3_storage.region.unwrap());
         assert_eq!("admin", &s3_storage.access_key.unwrap());
         assert_eq!("password", &s3_storage.secret_key.unwrap());
-        assert_eq!(Some(true), s3_storage.path_style_access);
+        assert!(s3_storage.path_style_access);
 
         let text = r#"
             s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password" }
@@ -175,11 +175,13 @@ mod tests {
         let storage: Storage = toml::from_str(text).unwrap();
         assert!(storage.s3_storage.is_some());
         assert!(storage.oss_storage.is_some());
+        let s3_storage = storage.s3_storage.unwrap();
+        assert!(!s3_storage.path_style_access);
         let oss_storage = storage.oss_storage.unwrap();
         assert_eq!("http://127.0.0.1:9000", &oss_storage.endpoint.unwrap());
         assert_eq!("admin", &oss_storage.access_key.unwrap());
         assert_eq!("password", &oss_storage.secret_key.unwrap());
-        assert_eq!(Some(false), oss_storage.path_style_access);
+        assert!(!oss_storage.path_style_access);
     }
 
     #[test]
