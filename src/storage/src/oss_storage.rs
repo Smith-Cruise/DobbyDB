@@ -14,6 +14,8 @@ pub struct OSSStorage {
     pub access_key: Option<String>,
     #[serde(rename = "secret-key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "path-style-access")]
+    pub path_style_access: Option<bool>,
 }
 
 impl StorageTrait for OSSStorage {
@@ -30,6 +32,9 @@ impl StorageTrait for OSSStorage {
         }
         if let Some(secret_key) = &self.secret_key {
             builder = builder.with_secret_access_key(secret_key);
+        }
+        if let Some(path_style_access) = self.path_style_access {
+            builder = builder.with_virtual_hosted_style_request(!path_style_access);
         }
         builder
             .build()
