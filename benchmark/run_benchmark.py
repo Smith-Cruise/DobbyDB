@@ -3,6 +3,7 @@ import argparse
 import csv
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -170,17 +171,27 @@ class DobbyDbRunner(EngineRunner):
             str(sql_path_for_cli),
         ]
 
-        result = subprocess.run(
-            command,
-            cwd=self.repo_root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.repo_root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raw_output = format_dobbydb_output(command, sql, str(exc))
+            raise BenchmarkError(
+                f"failed to execute DobbyDB process: {exc}", raw_output=raw_output
+            ) from exc
         raw_output = format_dobbydb_output(command, sql, result.stdout)
         if result.returncode != 0:
-            raise BenchmarkError(result.stdout.rstrip(), raw_output=raw_output)
+            raise BenchmarkError(
+                format_process_failure(result.returncode, result.stdout),
+                raw_output=raw_output,
+            )
 
         elapsed_seconds = parse_elapsed_seconds(result.stdout)
         if elapsed_seconds is None:
@@ -290,6 +301,24 @@ def parse_elapsed_seconds(output: str) -> float | None:
     if match is None:
         return None
     return float(match.group(1))
+
+
+def format_process_failure(returncode: int, output: str) -> str:
+    output = output.rstrip()
+    if returncode < 0:
+        signal_number = -returncode
+        try:
+            signal_name = signal.Signals(signal_number).name
+        except ValueError:
+            signal_name = f"signal {signal_number}"
+        message = f"DobbyDB process was terminated by {signal_name}"
+        if output:
+            return f"{message}: {output}"
+        return message
+
+    if output:
+        return output
+    return f"DobbyDB process exited with status {returncode}"
 
 
 def quote_identifier(identifier: str) -> str:
