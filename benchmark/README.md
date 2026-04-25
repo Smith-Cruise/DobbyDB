@@ -33,9 +33,11 @@ The runner requires these options for all engines:
 
 Optional common options:
 
-- `--runs`: runs per query. Defaults to `3`.
+- `--runs`: runs per query. Defaults to `1`.
 - `--query`: run only one query, such as `q01`. This option can be specified
   multiple times.
+- `--output`: parent directory for benchmark output artifacts. Defaults to
+  `/tmp`.
 
 ## DobbyDB
 
@@ -119,7 +121,19 @@ Running q01...
 q01      |      2.862 |      2.862
 
 Total queries: 1
-Total runs: 1
+Successful runs: 1
+Failed runs: 0
 Total elapsed(s): 2.862
 Average per run(s): 2.862
+Benchmark output: /tmp/dobbydb-benchmark-20260425-153000-12345
 ```
+
+Each benchmark run creates a timestamped directory under `--output` with:
+
+- `console.txt`: benchmark console output.
+- `results.csv`: query, run index, status, elapsed seconds, and error message.
+- `raw/<query>/run<N>.txt`: SQL text and SQL output result for each run.
+  DobbyDB raw files include both extracted `sql_result` and full `raw_output`.
+
+If one SQL run fails, the runner records it as `failed`, prints a `Skip ...`
+message, and continues with the remaining runs.

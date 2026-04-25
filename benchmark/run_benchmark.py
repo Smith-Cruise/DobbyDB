@@ -1,22 +1,94 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import os
 import re
 import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 
-RUNS_PER_QUERY = 3
+RUNS_PER_QUERY = 1
 SUPPORTED_BENCHMARK_TYPES = ("tpch",)
 ELAPSED_PATTERN = re.compile(r"^Elapsed ([0-9.]+) seconds\.$", re.MULTILINE)
 
 
 class BenchmarkError(Exception):
-    pass
+    def __init__(self, message: str, raw_output: str | None = None) -> None:
+        super().__init__(message)
+        self.raw_output = raw_output
+
+
+@dataclass(frozen=True)
+class QueryRunResult:
+    elapsed_seconds: float
+    raw_output: str
+
+
+class BenchmarkOutput:
+    def __init__(self, run_dir: Path) -> None:
+        self.run_dir = run_dir
+        self.raw_dir = run_dir / "raw"
+        self.console_path = run_dir / "console.txt"
+        self.results_path = run_dir / "results.csv"
+
+        self.raw_dir.mkdir(parents=True, exist_ok=False)
+        self.console_file = self.console_path.open("w", encoding="utf-8")
+        self.results_file = self.results_path.open("w", newline="", encoding="utf-8")
+        self.results_writer = csv.writer(self.results_file)
+        self.results_writer.writerow(["query", "run", "status", "elapsed_seconds", "error"])
+        self.results_file.flush()
+
+    @classmethod
+    def create(cls, output_root: Path) -> "BenchmarkOutput":
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_root = output_root.expanduser()
+        if not output_root.is_absolute():
+            output_root = output_root.resolve()
+        run_dir = output_root / f"dobbydb-benchmark-{timestamp}-{os.getpid()}"
+        run_dir.mkdir(parents=True, exist_ok=False)
+        return cls(run_dir)
+
+    def log(self, message: str = "") -> None:
+        print(message)
+        print(message, file=self.console_file)
+        self.console_file.flush()
+
+    def write_result(self, query_name: str, run_index: int, result: QueryRunResult) -> None:
+        self.results_writer.writerow(
+            [query_name, run_index, "success", format_seconds(result.elapsed_seconds), ""]
+        )
+        self.results_file.flush()
+        self.write_raw_output(query_name, run_index, result.raw_output)
+
+    def write_failure(
+        self,
+        query_name: str,
+        run_index: int,
+        error: BenchmarkError,
+    ) -> None:
+        error_message = " ".join(str(error).splitlines())
+        self.results_writer.writerow(
+            [query_name, run_index, "failed", "", error_message]
+        )
+        self.results_file.flush()
+        if error.raw_output is not None:
+            self.write_raw_output(query_name, run_index, error.raw_output)
+
+    def write_raw_output(self, query_name: str, run_index: int, raw_output: str) -> None:
+        query_dir = self.raw_dir / query_name
+        query_dir.mkdir(parents=True, exist_ok=True)
+        raw_path = query_dir / f"run{run_index}.txt"
+        raw_path.write_text(raw_output, encoding="utf-8")
+
+    def close(self) -> None:
+        self.results_file.close()
+        self.console_file.close()
 
 
 class BenchmarkSuite:
@@ -54,7 +126,7 @@ class EngineRunner(ABC):
         pass
 
     @abstractmethod
-    def run_query(self, sql_file: Path) -> float:
+    def run_query(self, sql_file: Path) -> QueryRunResult:
         pass
 
     def close(self) -> None:
@@ -83,8 +155,9 @@ class DobbyDbRunner(EngineRunner):
         if not self.config_path.is_file():
             raise BenchmarkError(f"config file does not exist: {self.config_path}")
 
-    def run_query(self, sql_file: Path) -> float:
+    def run_query(self, sql_file: Path) -> QueryRunResult:
         sql_path_for_cli = Path("benchmark") / self.benchmark_type / sql_file.name
+        sql = sql_file.read_text(encoding="utf-8")
         command = [
             str(self.bin_path),
             "--config",
@@ -105,16 +178,18 @@ class DobbyDbRunner(EngineRunner):
             stderr=subprocess.STDOUT,
             check=False,
         )
+        raw_output = format_dobbydb_output(command, sql, result.stdout)
         if result.returncode != 0:
-            raise BenchmarkError(result.stdout.rstrip())
+            raise BenchmarkError(result.stdout.rstrip(), raw_output=raw_output)
 
         elapsed_seconds = parse_elapsed_seconds(result.stdout)
         if elapsed_seconds is None:
             raise BenchmarkError(
                 "failed to parse elapsed time from DobbyDB output:\n"
-                f"{result.stdout.rstrip()}"
+                f"{result.stdout.rstrip()}",
+                raw_output=raw_output,
             )
-        return elapsed_seconds
+        return QueryRunResult(elapsed_seconds=elapsed_seconds, raw_output=raw_output)
 
 
 class StarRocksRunner(EngineRunner):
@@ -160,22 +235,49 @@ class StarRocksRunner(EngineRunner):
             self.close()
             raise BenchmarkError(f"failed to connect to StarRocks: {exc}") from exc
 
-    def run_query(self, sql_file: Path) -> float:
+    def run_query(self, sql_file: Path) -> QueryRunResult:
         if self.connection is None:
             raise BenchmarkError("StarRocks connection has not been prepared")
 
         sql = sql_file.read_text(encoding="utf-8")
+        result_sets = []
         start = time.perf_counter()
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(sql)
                 while True:
-                    cursor.fetchall()
+                    columns = (
+                        [description[0] for description in cursor.description]
+                        if cursor.description
+                        else []
+                    )
+                    rows = cursor.fetchall()
+                    result_sets.append((columns, rows))
                     if not cursor.nextset():
                         break
         except Exception as exc:
-            raise BenchmarkError(f"StarRocks query failed: {exc}") from exc
-        return time.perf_counter() - start
+            raw_output = format_starrocks_output(
+                query_name=sql_file.stem,
+                sql=sql,
+                status="failed",
+                elapsed_seconds=None,
+                result_sets=result_sets,
+                error=str(exc),
+            )
+            raise BenchmarkError(
+                f"StarRocks query failed: {exc}", raw_output=raw_output
+            ) from exc
+
+        elapsed_seconds = time.perf_counter() - start
+        raw_output = format_starrocks_output(
+            query_name=sql_file.stem,
+            sql=sql,
+            status="success",
+            elapsed_seconds=elapsed_seconds,
+            result_sets=result_sets,
+            error=None,
+        )
+        return QueryRunResult(elapsed_seconds=elapsed_seconds, raw_output=raw_output)
 
     def close(self) -> None:
         if self.connection is not None:
@@ -193,6 +295,96 @@ def parse_elapsed_seconds(output: str) -> float | None:
 def quote_identifier(identifier: str) -> str:
     escaped = identifier.replace("`", "``")
     return f"`{escaped}`"
+
+
+def format_dobbydb_output(command: Sequence[str], sql: str, process_output: str) -> str:
+    sql_result = extract_dobbydb_sql_result(process_output)
+    return "\n".join(
+        [
+            "command:",
+            " ".join(command),
+            "",
+            "sql:",
+            sql.rstrip(),
+            "",
+            "sql_result:",
+            sql_result,
+            "",
+            "raw_output:",
+            process_output.rstrip(),
+            "",
+        ]
+    )
+
+
+def extract_dobbydb_sql_result(process_output: str) -> str:
+    result_lines = []
+    for line in process_output.splitlines():
+        if line.startswith("Elapsed ") or re.match(r"^\d+ row\(s\) fetched\.", line):
+            break
+        result_lines.append(line)
+
+    result = "\n".join(result_lines).strip()
+    if result:
+        return result
+    return "(no SQL result captured from DobbyDB stdout)"
+
+
+def format_starrocks_output(
+    query_name: str,
+    sql: str,
+    status: str,
+    elapsed_seconds: float | None,
+    result_sets: Sequence[tuple[Sequence[str], Sequence[Sequence[object]]]],
+    error: str | None,
+) -> str:
+    lines = [
+        f"query={query_name}",
+        f"status={status}",
+    ]
+    if elapsed_seconds is not None:
+        lines.append(f"elapsed_seconds={format_seconds(elapsed_seconds)}")
+    if error is not None:
+        lines.append(f"error={error}")
+
+    lines.extend(["", "sql:", sql.rstrip(), "", "output:"])
+    if not result_sets:
+        lines.append("(no result sets)")
+    for result_set_index, (columns, rows) in enumerate(result_sets, start=1):
+        lines.append(f"result_set={result_set_index}")
+        lines.append(format_result_set(columns, rows))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_result_set(
+    columns: Sequence[str], rows: Sequence[Sequence[object]]
+) -> str:
+    if not columns:
+        return f"(no columns, {len(rows)} rows)"
+
+    table_rows = [[format_sql_value(value) for value in row] for row in rows]
+    widths = [
+        max(len(str(column)), *(len(row[index]) for row in table_rows))
+        for index, column in enumerate(columns)
+    ]
+    header = " | ".join(
+        f"{column:<{width}}" for column, width in zip(columns, widths)
+    )
+    separator = "-+-".join("-" * width for width in widths)
+    body = [
+        " | ".join(f"{value:<{width}}" for value, width in zip(row, widths))
+        for row in table_rows
+    ]
+    return "\n".join([header, separator, *body, f"({len(rows)} rows)"])
+
+
+def format_sql_value(value: object) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bytes):
+        return value.hex()
+    return str(value)
 
 
 def positive_int(value: str) -> int:
@@ -253,6 +445,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=normalize_query_name,
         dest="queries",
         help="Run only the named query, for example q01. Can be specified multiple times.",
+    )
+    parser.add_argument(
+        "--output",
+        default="/tmp",
+        help="Directory for benchmark output artifacts. Defaults to /tmp.",
     )
 
     dobbydb = parser.add_argument_group("DobbyDB connection")
@@ -320,69 +517,91 @@ def format_seconds(value: float) -> str:
 
 def summarize_times(times: Sequence[float]) -> tuple[float, float]:
     total_seconds = sum(times)
-    return total_seconds, total_seconds / len(times)
+    average_seconds = total_seconds / len(times) if times else 0.0
+    return total_seconds, average_seconds
 
 
-def print_results_header(runs: int) -> None:
-    headers = ["query", *(f"run{index}(s)" for index in range(1, runs + 1)), "avg(s)"]
-    widths = [8, *(10 for _ in range(runs)), 10]
-    print_row(headers, widths)
-    print_separator(widths)
-
-
-def print_row(values: Sequence[str], widths: Sequence[int]) -> None:
+def print_row(values: Sequence[str], widths: Sequence[int]) -> str:
     formatted = [
         f"{value:<{width}}" if index == 0 else f"{value:>{width}}"
         for index, (value, width) in enumerate(zip(values, widths))
     ]
-    print(" | ".join(formatted))
+    return " | ".join(formatted)
 
 
-def print_separator(widths: Sequence[int]) -> None:
-    print("-+-".join("-" * width for width in widths))
+def print_separator(widths: Sequence[int]) -> str:
+    return "-+-".join("-" * width for width in widths)
+
+
+def log_results_header(output: BenchmarkOutput, runs: int) -> None:
+    headers = ["query", *(f"run{index}(s)" for index in range(1, runs + 1)), "avg(s)"]
+    widths = [8, *(10 for _ in range(runs)), 10]
+    output.log(print_row(headers, widths))
+    output.log(print_separator(widths))
 
 
 def run_benchmark(args: argparse.Namespace, repo_root: Path) -> None:
-    suite = BenchmarkSuite(repo_root, args.benchmark_type, args.queries)
-    runner = build_runner(args, repo_root)
-    all_times = []
+    output = BenchmarkOutput.create(Path(args.output))
+    runner = None
 
     try:
-        runner.prepare()
-        print_results_header(args.runs)
+        suite = BenchmarkSuite(repo_root, args.benchmark_type, args.queries)
+        runner = build_runner(args, repo_root)
+        all_times = []
+        failed_runs = 0
 
-        for sql_file in suite.sql_files:
-            query_name = sql_file.stem
-            run_values = []
+        try:
+            runner.prepare()
+            log_results_header(output, args.runs)
 
-            print(f"Running {query_name}...")
-            for run_index in range(1, args.runs + 1):
-                try:
-                    elapsed_seconds = runner.run_query(sql_file)
-                except BenchmarkError as exc:
-                    raise BenchmarkError(
-                        f"benchmark failed for {query_name} on run {run_index}: {exc}"
-                    ) from exc
-                run_values.append(elapsed_seconds)
-                all_times.append(elapsed_seconds)
+            for sql_file in suite.sql_files:
+                query_name = sql_file.stem
+                run_values = []
+                run_cells = []
 
-            average_seconds = sum(run_values) / len(run_values)
-            row = [
-                query_name,
-                *(format_seconds(value) for value in run_values),
-                format_seconds(average_seconds),
-            ]
-            print_row(row, [8, *(10 for _ in range(args.runs)), 10])
+                output.log(f"Running {query_name}...")
+                for run_index in range(1, args.runs + 1):
+                    try:
+                        result = runner.run_query(sql_file)
+                    except BenchmarkError as exc:
+                        failed_runs += 1
+                        output.write_failure(query_name, run_index, exc)
+                        output.log(
+                            f"Skip {query_name} run {run_index}: benchmark failed: {exc}"
+                        )
+                        run_cells.append("FAILED")
+                        continue
+                    output.write_result(query_name, run_index, result)
+                    run_values.append(result.elapsed_seconds)
+                    run_cells.append(format_seconds(result.elapsed_seconds))
+                    all_times.append(result.elapsed_seconds)
+
+                average_seconds = sum(run_values) / len(run_values) if run_values else None
+                row = [
+                    query_name,
+                    *run_cells,
+                    "FAILED" if average_seconds is None else format_seconds(average_seconds),
+                ]
+                output.log(print_row(row, [8, *(10 for _ in range(args.runs)), 10]))
+        finally:
+            if runner is not None:
+                runner.close()
+
+        total_seconds, overall_average_seconds = summarize_times(all_times)
+
+        output.log()
+        output.log(f"Total queries: {len(suite.sql_files)}")
+        output.log(f"Successful runs: {len(all_times)}")
+        output.log(f"Failed runs: {failed_runs}")
+        output.log(f"Total elapsed(s): {format_seconds(total_seconds)}")
+        output.log(f"Average per run(s): {format_seconds(overall_average_seconds)}")
+        output.log(f"Benchmark output: {output.run_dir}")
+    except BenchmarkError:
+        output.log()
+        output.log(f"Benchmark output: {output.run_dir}")
+        raise
     finally:
-        runner.close()
-
-    total_seconds, overall_average_seconds = summarize_times(all_times)
-
-    print()
-    print(f"Total queries: {len(suite.sql_files)}")
-    print(f"Total runs: {len(all_times)}")
-    print(f"Total elapsed(s): {format_seconds(total_seconds)}")
-    print(f"Average per run(s): {format_seconds(overall_average_seconds)}")
+        output.close()
 
 
 def main() -> int:
