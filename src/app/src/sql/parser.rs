@@ -378,6 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_multiple_statements() -> Result<()> {
+        let statements = ExtendedParser::parse_sql("show catalogs; show variables;")?;
+
+        assert_eq!(statements.len(), 2);
+        assert_eq!(
+            statements[0],
+            ShowCatalogs(Box::new(ShowCatalogsStatement { filter: None }))
+        );
+        assert_eq!(
+            statements[1],
+            ShowVars(Box::new(ShowVariablesStatement {
+                filter: None,
+                verbose: false,
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_simple_sql() -> Result<()> {
         // let statement = ExtendedParser::parse_sql("desc a")?;
         // match &statement[0] {

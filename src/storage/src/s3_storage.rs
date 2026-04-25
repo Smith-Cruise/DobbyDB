@@ -16,6 +16,8 @@ pub struct S3Storage {
     pub access_key: Option<String>,
     #[serde(rename = "secret-key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "path-style-access", default)]
+    pub path_style_access: bool,
 }
 
 impl StorageTrait for S3Storage {
@@ -36,6 +38,7 @@ impl StorageTrait for S3Storage {
         if let Some(secret_key) = &self.secret_key {
             builder = builder.with_secret_access_key(secret_key);
         }
+        builder = builder.with_virtual_hosted_style_request(!self.path_style_access);
         builder
             .build()
             .map(|store| Arc::new(store) as Arc<dyn ObjectStore>)
