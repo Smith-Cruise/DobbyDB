@@ -24,6 +24,8 @@ use datafusion::datasource::physical_plan::{
 };
 use datafusion::datasource::table_schema::TableSchema;
 use datafusion::error::DataFusionError;
+use datafusion::execution::cache::TableScopedPath;
+use datafusion::execution::cache::cache_manager::CachedFileList;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
@@ -98,7 +100,7 @@ impl TableProvider for HiveTableProvider {
 
         let scan_file_list: Vec<PartitionedFile> = if self.partitions.is_empty() {
             let file_object_metas =
-                list_files(&object_store, &self.hive_storage_info.table_location).await?;
+                list_files(state, &object_store, &self.hive_storage_info.table_location).await?;
             file_object_metas
                 .iter()
                 .map(|file_object_meta| PartitionedFile::from(file_object_meta.clone()))
@@ -124,7 +126,7 @@ impl TableProvider for HiveTableProvider {
                     let object_store = Arc::clone(&object_store);
 
                     Ok(async move {
-                        let file_object_metas = list_files(&object_store, &location).await?;
+                        let file_object_metas = list_files(state, &object_store, &location).await?;
                         let partitioned_files = file_object_metas
                             .into_iter()
                             .map(|file_object_meta| {
@@ -706,10 +708,22 @@ fn parse_partition_value(s: &str, data_type: &DataType) -> Result<ScalarValue> {
 }
 
 async fn list_files(
+    state: &dyn Session,
     object_store: &Arc<dyn ObjectStore>,
     directory_full_location: &str,
 ) -> Result<Vec<ObjectMeta>> {
     let relative_path = location_to_object_store_path(directory_full_location)?;
+    let cache_key = TableScopedPath {
+        table: None,
+        path: relative_path.clone(),
+    };
+
+    let list_files_cache = state.runtime_env().cache_manager.get_list_files_cache();
+    if let Some(cache) = &list_files_cache
+        && let Some(cached_files) = cache.get(&cache_key)
+    {
+        return Ok(cached_files.files.as_ref().clone());
+    }
 
     let file_object_metas: Vec<_> = object_store
         .list(Some(&relative_path))
@@ -732,6 +746,11 @@ async fn list_files(
         }
         results.push(meta);
     }
+
+    if let Some(cache) = list_files_cache {
+        cache.put(&cache_key, CachedFileList::new(results.clone()));
+    }
+
     Ok(results)
 }
 
@@ -1062,6 +1081,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_partitioned_files_preserves_partition_values() {
+        let ctx = SessionContext::new();
+        let state = ctx.state();
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
         put_test_object(&store, "table/dt=2024-01-02/file2.parquet", b"b").await;
@@ -1069,10 +1090,11 @@ mod tests {
         let tasks: Vec<PartitionedFileTask> = vec![
             {
                 let store = Arc::clone(&store);
+                let state = state.clone();
                 Box::pin(async move {
                     sleep(Duration::from_millis(30)).await;
                     let partition_values = vec![ScalarValue::Utf8(Some("2024-01-01".to_string()))];
-                    let files = list_files(&store, "memory:///table/dt=2024-01-01")
+                    let files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
                         .await?
                         .into_iter()
                         .map(|file_object_meta| {
@@ -1086,9 +1108,10 @@ mod tests {
             },
             {
                 let store = Arc::clone(&store);
+                let state = state.clone();
                 Box::pin(async move {
                     let partition_values = vec![ScalarValue::Utf8(Some("2024-01-02".to_string()))];
-                    let files = list_files(&store, "memory:///table/dt=2024-01-02")
+                    let files = list_files(&state, &store, "memory:///table/dt=2024-01-02")
                         .await?
                         .into_iter()
                         .map(|file_object_meta| {
@@ -1146,19 +1169,55 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files_filters_hidden_and_empty_objects() {
+        let ctx = SessionContext::new();
+        let state = ctx.state();
         let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
         put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
         put_test_object(&store, "table/dt=2024-01-01/_temporary", b"a").await;
         put_test_object(&store, "table/dt=2024-01-01/.metadata", b"a").await;
         put_test_object(&store, "table/dt=2024-01-01/empty.parquet", b"").await;
 
-        let files = list_files(&store, "memory:///table/dt=2024-01-01")
+        let files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
             .await
             .unwrap();
 
         assert_eq!(files.len(), 1);
         assert_eq!(
             files[0].location.as_ref(),
+            "table/dt=2024-01-01/file1.parquet"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_files_reuses_cached_file_list() {
+        let ctx = SessionContext::new();
+        let state = ctx.state();
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
+
+        // The first listing populates the file list cache for this session.
+        let first_files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
+            .await
+            .unwrap();
+        assert_eq!(first_files.len(), 1);
+
+        put_test_object(&store, "table/dt=2024-01-01/file2.parquet", b"b").await;
+
+        let fresh_ctx = SessionContext::new();
+        let fresh_state = fresh_ctx.state();
+        // A fresh session has an empty cache, so it verifies the object store now has both files.
+        let uncached_files = list_files(&fresh_state, &store, "memory:///table/dt=2024-01-01")
+            .await
+            .unwrap();
+        assert_eq!(uncached_files.len(), 2);
+
+        // The original session should still reuse the cached listing and return only file1.
+        let cached_files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
+            .await
+            .unwrap();
+        assert_eq!(cached_files.len(), 1);
+        assert_eq!(
+            cached_files[0].location.as_ref(),
             "table/dt=2024-01-01/file1.parquet"
         );
     }

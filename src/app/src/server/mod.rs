@@ -18,8 +18,15 @@ use std::sync::Arc;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct DobbyDbArgs {
-    #[clap(long, help = "Specify config path")]
-    config: String,
+    #[clap(
+        long,
+        required_unless_present = "agent_help",
+        help = "Specify config path"
+    )]
+    config: Option<String>,
+
+    #[clap(long, help = "Print an AI-agent friendly usage guide, then exit")]
+    agent_help: bool,
 
     #[clap(
         long,
@@ -53,12 +60,72 @@ struct DobbyDbArgs {
 
 pub fn run() -> Result<()> {
     let args = DobbyDbArgs::parse();
-    let mut dobbydb_context = DobbyDbContext::new(Some(&args.config))?;
+    if args.agent_help {
+        print_agent_help();
+        return Ok(());
+    }
+
+    let config = args
+        .config
+        .as_deref()
+        .expect("clap requires --config unless --agent-help is present");
+    let mut dobbydb_context = DobbyDbContext::new(Some(config))?;
     dobbydb_context.default_catalog = args.default_catalog.clone();
     dobbydb_context.default_schema = args.default_schema.clone();
     let dobbydb_context = Arc::new(dobbydb_context);
     let cpu_handle = dobbydb_context.runtime_manager.cpu_handle();
     cpu_handle.block_on(async_run(dobbydb_context.clone(), args))
+}
+
+fn print_agent_help() {
+    println!(
+        r#"DobbyDB Agent Guide
+
+DobbyDB is a lakehouse SQL query engine based on DataFusion. Use it to query
+tables from configured HMS or Glue catalogs.
+
+Basic commands:
+  dobbydb --config config.toml
+  dobbydb --config config.toml --command "show catalogs;"
+  dobbydb --config config.toml --command "show schemas;"
+  dobbydb --config config.toml --command "show tables;"
+  dobbydb --config config.toml --file query.sql
+
+Recommended discovery workflow:
+  1. show catalogs;
+  2. use catalog <catalog_name>;
+  3. show schemas;
+  4. use <schema_name>;
+  5. show tables;
+  6. select * from <table_name> limit 10;
+
+Useful SQL:
+  show catalogs;
+  show catalogs like '%prod%';
+  show schemas;
+  show schemas like '%default%';
+  show tables;
+  show tables like '%events%';
+  show variables;
+  show variables verbose;
+
+Config examples:
+  [[hms]]
+  name = "hms_1"
+  metastore-uri = "127.0.0.1:9083"
+
+  [[glue]]
+  name = "glue_catalog"
+  aws-glue-region = "us-west-2"
+  s3-storage = {{ region = "us-west-2" }}
+
+Notes:
+  - Interactive SQL statements must end with a semicolon.
+  - --command and --file are mutually exclusive.
+  - Use fully qualified table names when context is unclear:
+    select * from <catalog>.<schema>.<table> limit 10;
+"#
+    );
 }
 
 async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> Result<()> {
@@ -132,6 +199,7 @@ mod tests {
             args.command.as_deref(),
             Some("show catalogs; show variables;")
         );
+        assert_eq!(args.config.as_deref(), Some("config.toml"));
     }
 
     #[test]
@@ -155,5 +223,22 @@ mod tests {
             .to_str()
             .expect("temp sql file path should be valid utf-8");
         assert_eq!(args.file.as_deref(), Some(file_path));
+    }
+
+    #[test]
+    fn test_parse_agent_help_without_config() {
+        let args = DobbyDbArgs::try_parse_from(["dobbydb", "--agent-help"])
+            .expect("--agent-help should not require --config");
+
+        assert!(args.agent_help);
+        assert!(args.config.is_none());
+    }
+
+    #[test]
+    fn test_parse_requires_config_without_agent_help() {
+        let err = DobbyDbArgs::try_parse_from(["dobbydb", "--command", "show catalogs;"])
+            .expect_err("normal execution should require --config");
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 }
