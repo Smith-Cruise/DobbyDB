@@ -505,9 +505,11 @@ mod tests {
             InstrumentedObjectStoreRegistry::new()
                 .with_profile_mode(InstrumentedObjectStoreMode::Summary),
         );
-        let mut cache_manager_config = CacheManagerConfig::default();
-        cache_manager_config.list_files_cache_limit = 5 * 1024 * 1024; // 5MB
-        cache_manager_config.list_files_cache_ttl = Some(Duration::from_hours(1));
+        let cache_manager_config = CacheManagerConfig {
+            list_files_cache_limit: 5 * 1024 * 1024, // 5MB
+            list_files_cache_ttl: Some(Duration::from_hours(1)),
+            ..Default::default()
+        };
         let runtime_env = RuntimeEnvBuilder::new()
             .with_cache_manager(cache_manager_config)
             .with_object_store_registry(instrumented_registry.clone())
