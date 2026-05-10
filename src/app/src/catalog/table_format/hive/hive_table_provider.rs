@@ -350,16 +350,9 @@ fn build_parquet_exec(
         io_handle,
     ));
 
-    let mut source = ParquetSource::new(table_schema)
+    let source = ParquetSource::new(table_schema)
         .with_table_parquet_options(parquet_options)
         .with_parquet_file_reader_factory(parquet_file_reader_factory);
-
-    let df_schema = data_schema.as_ref().clone().to_dfschema()?;
-    let predicate = conjunction(filters.iter().cloned())
-        .and_then(|p| state.create_physical_expr(p, &df_schema).ok());
-    if let Some(pred) = predicate {
-        source = source.with_predicate(pred);
-    }
 
     let mut builder =
         FileScanConfigBuilder::new(store_url, Arc::new(source)).with_file_group(file_group);
