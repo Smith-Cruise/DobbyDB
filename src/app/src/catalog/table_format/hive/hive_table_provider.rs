@@ -27,7 +27,6 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::cache::TableScopedPath;
 use datafusion::execution::cache::cache_manager::CachedFileList;
 use datafusion::execution::object_store::ObjectStoreUrl;
-use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::object_store::path::Path;
 use datafusion::object_store::{ObjectMeta, ObjectStore};
@@ -160,9 +159,7 @@ impl TableProvider for HiveTableProvider {
                 store_url,
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
-                &filter_data_filters(filters, self.hive_storage_info.table_schema.file_schema()),
                 state,
-                self.hive_storage_info.table_schema.file_schema(),
                 projection,
                 limit,
             ),
@@ -224,28 +221,6 @@ fn build_partition_values(
         .iter()
         .zip(partition.partition_values.iter())
         .map(|(field, val)| parse_partition_value(val, field.data_type()))
-        .collect()
-}
-
-fn filter_data_filters(filters: &[Expr], data_schema: &SchemaRef) -> Vec<Expr> {
-    if filters.is_empty() {
-        return vec![];
-    }
-
-    let data_col_name_set: HashSet<String> = data_schema
-        .fields()
-        .iter()
-        .map(|f| f.name().to_ascii_lowercase())
-        .collect();
-
-    filters
-        .iter()
-        .filter(|f| {
-            f.column_refs()
-                .iter()
-                .all(|c| data_col_name_set.contains(&c.name().to_ascii_lowercase()))
-        })
-        .cloned()
         .collect()
 }
 
@@ -327,15 +302,12 @@ fn detect_file_group_compression(file_group: &FileGroup) -> Result<CompressionTy
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_parquet_exec(
     io_handle: Handle,
     store_url: ObjectStoreUrl,
     table_schema: TableSchema,
     file_group: FileGroup,
-    filters: &[Expr],
     state: &dyn Session,
-    data_schema: &SchemaRef,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
 ) -> Result<Arc<dyn ExecutionPlan>> {

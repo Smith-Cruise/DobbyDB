@@ -71,6 +71,7 @@ pub struct ExtendedSessionContext {
 impl Default for ExtendedSessionContext {
     fn default() -> Self {
         let dobbydb_context = Arc::new(DobbyDbContext {
+            server_config: Default::default(),
             catalog_manager: Arc::new(CatalogManager::default()),
             runtime_manager: Arc::new(RuntimeManager::default()),
             default_catalog: None,

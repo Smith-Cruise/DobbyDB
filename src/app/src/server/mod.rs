@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-const DATAFUSION_MEMORY_FRACTION: f64 = 0.8;
+const DEFAULT_MEMORY_FRACTION: f64 = 0.8;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -114,11 +114,14 @@ Useful SQL:
   show variables verbose;
 
 Config examples:
-  [[hms]]
+  [server]
+  memory-limit = "4GB"
+
+  [[catalog.hms]]
   name = "hms_1"
   metastore-uri = "127.0.0.1:9083"
 
-  [[glue]]
+  [[catalog.glue]]
   name = "glue_catalog"
   aws-glue-region = "us-west-2"
   s3-storage = {{ region = "us-west-2" }}
@@ -136,8 +139,12 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
+    let (memory_limit, memory_fraction) = match dobbydb_context.server_config.memory_limit {
+        Some(limit) => (limit, 1.0),
+        None => (system_memory_bytes()?, DEFAULT_MEMORY_FRACTION),
+    };
     let runtime_env = RuntimeEnvBuilder::new()
-        .with_memory_limit(system_memory_bytes()?, DATAFUSION_MEMORY_FRACTION)
+        .with_memory_limit(memory_limit, memory_fraction)
         .with_object_list_cache_limit(5 * 1024 * 1024) // 5MB
         .with_object_list_cache_ttl(Some(Duration::from_hours(1))) // 1 hour cache
         .with_object_store_registry(instrumented_registry.clone())

@@ -1,10 +1,13 @@
-[[glue]]
+[server]
+memory-limit = "4GB"
+
+[[catalog.glue]]
 name = "glue_catalog"
 aws-glue-region = "us-west-2"
 aws-glue-access-key = "ak"
 aws-glue-secret-key = "sk"
 s3-storage = { region = "us-west-2", access-key = "ak", secret-key = "sk" }
 
-[[hms]]
+[[catalog.hms]]
 name = "hms_1"
 metastore_uri = "127.0.0.1:9087"

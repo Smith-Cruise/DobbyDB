@@ -10,5 +10,6 @@ pub(crate) use internal::{
     INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
 };
 pub(crate) use manager::{
-    CatalogConfig, CatalogManager, DobbyDbCatalogProvider, DobbyDbCatalogProviderList,
+    CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
+    DobbyDbCatalogProviderList,
 };

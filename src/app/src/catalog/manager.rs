@@ -55,26 +55,24 @@ impl CatalogManager {
         }
     }
 
-    pub fn load_config(&mut self, config_path: &str) -> Result<()> {
-        let config = std::fs::read_to_string(config_path)?;
-        let configs: CatalogConfigs = toml::from_str(&config).map_err(|e| {
-            DataFusionError::Configuration(format!("Failed to parse config: {}", e))
-        })?;
+    pub fn load_catalogs(&mut self, catalogs: Option<&CatalogConfigs>) -> Result<()> {
+        if let Some(catalogs) = catalogs {
+            if let Some(ref hms_catalogs) = catalogs.hms {
+                for hms_catalog in hms_catalogs {
+                    self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
+                }
+            }
 
-        if let Some(catalogs) = configs.hms {
-            for hms_catalog in catalogs {
-                self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
+            if let Some(ref glue_catalogs) = catalogs.glue {
+                for glue_catalog in glue_catalogs {
+                    self.add_catalog(
+                        &glue_catalog.name,
+                        CatalogConfig::GLUE(glue_catalog.clone()),
+                    )?;
+                }
             }
         }
 
-        if let Some(catalogs) = configs.glue {
-            for glue_catalog in catalogs {
-                self.add_catalog(
-                    &glue_catalog.name,
-                    CatalogConfig::GLUE(glue_catalog.clone()),
-                )?;
-            }
-        }
         Ok(())
     }
 
@@ -97,6 +95,7 @@ impl CatalogManager {
             .get_catalog(catalog_name)
             .ok_or_else(|| DataFusionError::Plan(format!("unknown catalog {}", catalog_name)))?;
         let dobbydb_context = Arc::new(DobbyDbContext {
+            server_config: Default::default(),
             catalog_manager: Arc::new(self.clone()),
             runtime_manager: Arc::new(RuntimeManager::default()),
             default_catalog: None,
