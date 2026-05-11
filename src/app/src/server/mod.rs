@@ -6,7 +6,6 @@ use crate::context::DobbyDbContext;
 use crate::sql::session::ExtendedSessionContext;
 use clap::Parser;
 use datafusion::common::error::Result;
-use datafusion::error::DataFusionError;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_cli::object_storage::instrumented::{
     InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
@@ -16,8 +15,6 @@ use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-
-const DEFAULT_MEMORY_FRACTION: f64 = 0.8;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -139,12 +136,11 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
     let instrumented_registry = Arc::new(
         InstrumentedObjectStoreRegistry::new().with_profile_mode(args.object_store_profiling),
     );
-    let (memory_limit, memory_fraction) = match dobbydb_context.server_config.memory_limit {
-        Some(limit) => (limit, 1.0),
-        None => (system_memory_bytes()?, DEFAULT_MEMORY_FRACTION),
-    };
-    let runtime_env = RuntimeEnvBuilder::new()
-        .with_memory_limit(memory_limit, memory_fraction)
+    let mut runtime_env_builder = RuntimeEnvBuilder::new();
+    if let Some(memory_limit) = dobbydb_context.server_config.memory_limit {
+        runtime_env_builder = runtime_env_builder.with_memory_limit(memory_limit, 1.0);
+    }
+    let runtime_env = runtime_env_builder
         .with_object_list_cache_limit(5 * 1024 * 1024) // 5MB
         .with_object_list_cache_ttl(Some(Duration::from_hours(1))) // 1 hour cache
         .with_object_store_registry(instrumented_registry.clone())
@@ -168,38 +164,6 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
         repl::exec_from_repl(&session_context, &print_options).await;
     }
     Ok(())
-}
-
-fn system_memory_bytes() -> Result<usize> {
-    #[cfg(unix)]
-    {
-        // SAFETY: sysconf is thread-safe and does not require initialized pointers.
-        let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
-        // SAFETY: sysconf is thread-safe and does not require initialized pointers.
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
-        if pages <= 0 || page_size <= 0 {
-            return Err(DataFusionError::Configuration(
-                "failed to determine system memory size".to_string(),
-            ));
-        }
-
-        let pages = usize::try_from(pages).map_err(|err| {
-            DataFusionError::Configuration(format!("invalid system page count: {err}"))
-        })?;
-        let page_size = usize::try_from(page_size).map_err(|err| {
-            DataFusionError::Configuration(format!("invalid system page size: {err}"))
-        })?;
-        pages.checked_mul(page_size).ok_or_else(|| {
-            DataFusionError::Configuration("system memory size overflowed usize".to_string())
-        })
-    }
-
-    #[cfg(not(unix))]
-    {
-        Err(DataFusionError::NotImplemented(
-            "automatic system memory detection is only implemented on Unix platforms".to_string(),
-        ))
-    }
 }
 
 fn parse_command(command: &str) -> Result<String, String> {

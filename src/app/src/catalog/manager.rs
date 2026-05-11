@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct CatalogConfigs {
     pub hms: Option<Vec<HMSCatalogConfig>>,
     pub glue: Option<Vec<GlueCatalogConfig>>,
@@ -55,21 +55,19 @@ impl CatalogManager {
         }
     }
 
-    pub fn load_catalogs(&mut self, catalogs: Option<&CatalogConfigs>) -> Result<()> {
-        if let Some(catalogs) = catalogs {
-            if let Some(ref hms_catalogs) = catalogs.hms {
-                for hms_catalog in hms_catalogs {
-                    self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
-                }
+    pub fn load_catalogs(&mut self, catalogs: &CatalogConfigs) -> Result<()> {
+        if let Some(ref hms_catalogs) = catalogs.hms {
+            for hms_catalog in hms_catalogs {
+                self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
             }
+        }
 
-            if let Some(ref glue_catalogs) = catalogs.glue {
-                for glue_catalog in glue_catalogs {
-                    self.add_catalog(
-                        &glue_catalog.name,
-                        CatalogConfig::GLUE(glue_catalog.clone()),
-                    )?;
-                }
+        if let Some(ref glue_catalogs) = catalogs.glue {
+            for glue_catalog in glue_catalogs {
+                self.add_catalog(
+                    &glue_catalog.name,
+                    CatalogConfig::GLUE(glue_catalog.clone()),
+                )?;
             }
         }
 

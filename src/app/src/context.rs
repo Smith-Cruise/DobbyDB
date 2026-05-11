@@ -89,7 +89,7 @@ impl DobbyDbContext {
             DataFusionError::Configuration(format!("Failed to parse config: {}", e))
         })?;
         let mut catalog_manager = CatalogManager::new();
-        catalog_manager.load_catalogs(dobbydb_config.catalog.as_ref())?;
+        catalog_manager.load_catalogs(&dobbydb_config.catalog.unwrap_or_default())?;
         let server_config = dobbydb_config.server_config.unwrap_or_default();
         Ok(Self {
             server_config,
