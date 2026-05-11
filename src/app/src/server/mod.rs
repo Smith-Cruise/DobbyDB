@@ -15,6 +15,7 @@ use datafusion_cli::print_format::PrintFormat;
 use datafusion_cli::print_options::{MaxRows, PrintOptions};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 const DATAFUSION_MEMORY_FRACTION: f64 = 0.8;
 
@@ -137,6 +138,8 @@ async fn async_run(dobbydb_context: Arc<DobbyDbContext>, args: DobbyDbArgs) -> R
     );
     let runtime_env = RuntimeEnvBuilder::new()
         .with_memory_limit(system_memory_bytes()?, DATAFUSION_MEMORY_FRACTION)
+        .with_object_list_cache_limit(5 * 1024 * 1024) // 5MB
+        .with_object_list_cache_ttl(Some(Duration::from_hours(1))) // 1 hour cache
         .with_object_store_registry(instrumented_registry.clone())
         .build_arc()?;
 
