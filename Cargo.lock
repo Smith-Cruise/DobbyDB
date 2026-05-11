@@ -2695,6 +2695,7 @@ dependencies = [
  "hive_metastore",
  "iceberg",
  "iceberg-storage-opendal",
+ "libc",
  "rustyline",
  "serde",
  "sqlparser",
