@@ -14,7 +14,8 @@ use datafusion::catalog::memory::DataSourceExec;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::config::CsvOptions;
 use datafusion::common::parsers::CompressionTypeVariant;
-use datafusion::common::{Result, ToDFSchema};
+use datafusion::common::stats::Precision;
+use datafusion::common::{Result, Statistics, ToDFSchema};
 use datafusion::config::TableParquetOptions;
 use datafusion::datasource::TableType;
 use datafusion::datasource::file_format::file_compression_type::FileCompressionType;
@@ -143,6 +144,10 @@ impl TableProvider for HiveTableProvider {
             collect_partitioned_files(partition_scan_tasks, meta_fetch_concurrency).await?
         };
 
+        let statistics = build_file_size_statistics(
+            self.hive_storage_info.table_schema.table_schema().clone(),
+            &scan_file_list,
+        );
         let file_group = FileGroup::new(scan_file_list);
 
         let exec = match &self.hive_storage_info.input_format {
@@ -151,6 +156,7 @@ impl TableProvider for HiveTableProvider {
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
                 &self.hive_storage_info.serde_properties,
+                statistics,
                 projection,
                 limit,
             ),
@@ -160,6 +166,7 @@ impl TableProvider for HiveTableProvider {
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
                 state,
+                statistics,
                 projection,
                 limit,
             ),
@@ -186,6 +193,7 @@ fn build_csv_exec(
     table_schema: TableSchema,
     file_group: FileGroup,
     serde_properties: &HashMap<String, String>,
+    statistics: Statistics,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
@@ -202,6 +210,7 @@ fn build_csv_exec(
 
     let source = Arc::new(CsvSource::new(table_schema).with_csv_options(options));
     let mut builder = FileScanConfigBuilder::new(store_url, source).with_file_group(file_group);
+    builder = builder.with_statistics(statistics);
     builder = builder.with_file_compression_type(file_compression);
     if let Some(proj) = projection {
         builder = builder.with_projection_indices(Some(proj.clone()))?;
@@ -211,6 +220,17 @@ fn build_csv_exec(
     }
     let config = builder.build();
     Ok(DataSourceExec::from_data_source(config))
+}
+
+fn build_file_size_statistics(table_schema: SchemaRef, files: &[PartitionedFile]) -> Statistics {
+    let total_size = files
+        .iter()
+        .map(|file| usize::try_from(file.object_meta.size).unwrap_or(usize::MAX))
+        .fold(0usize, usize::saturating_add);
+
+    let mut statistics = Statistics::new_unknown(&table_schema);
+    statistics.total_byte_size = Precision::Inexact(total_size);
+    statistics
 }
 
 fn build_partition_values(
@@ -308,6 +328,7 @@ fn build_parquet_exec(
     table_schema: TableSchema,
     file_group: FileGroup,
     state: &dyn Session,
+    statistics: Statistics,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
@@ -328,6 +349,7 @@ fn build_parquet_exec(
 
     let mut builder =
         FileScanConfigBuilder::new(store_url, Arc::new(source)).with_file_group(file_group);
+    builder = builder.with_statistics(statistics);
     if let Some(proj) = projection {
         builder = builder.with_projection_indices(Some(proj.clone()))?;
     }
