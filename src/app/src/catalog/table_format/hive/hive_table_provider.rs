@@ -230,6 +230,7 @@ fn build_file_size_statistics(table_schema: SchemaRef, files: &[PartitionedFile]
 
     let mut statistics = Statistics::new_unknown(&table_schema);
     statistics.total_byte_size = Precision::Inexact(total_size);
+    statistics.num_rows = Precision::Inexact(total_size);
     statistics
 }
 
