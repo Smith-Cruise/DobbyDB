@@ -323,6 +323,9 @@ fn detect_file_group_compression(file_group: &FileGroup) -> Result<CompressionTy
     ))
 }
 
+// The parquet scan builder mirrors DataFusion scan inputs, so keeping these
+// arguments explicit is clearer than wrapping them only to satisfy clippy.
+#[allow(clippy::too_many_arguments)]
 fn build_parquet_exec(
     io_handle: Handle,
     store_url: ObjectStoreUrl,
