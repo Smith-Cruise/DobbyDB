@@ -144,9 +144,10 @@ impl TableProvider for HiveTableProvider {
             collect_partitioned_files(partition_scan_tasks, meta_fetch_concurrency).await?
         };
 
-        let statistics = build_file_size_statistics(
+        let statistics = build_table_statistics(
             self.hive_storage_info.table_schema.table_schema().clone(),
             &scan_file_list,
+            &self.hive_storage_info.table_properties,
         );
         let file_group = FileGroup::new(scan_file_list);
 
@@ -222,7 +223,11 @@ fn build_csv_exec(
     Ok(DataSourceExec::from_data_source(config))
 }
 
-fn build_file_size_statistics(table_schema: SchemaRef, files: &[PartitionedFile]) -> Statistics {
+fn build_table_statistics(
+    table_schema: SchemaRef,
+    files: &[PartitionedFile],
+    table_properties: &HashMap<String, String>,
+) -> Statistics {
     let total_size = files
         .iter()
         .map(|file| usize::try_from(file.object_meta.size).unwrap_or(usize::MAX))
@@ -230,8 +235,41 @@ fn build_file_size_statistics(table_schema: SchemaRef, files: &[PartitionedFile]
 
     let mut statistics = Statistics::new_unknown(&table_schema);
     statistics.total_byte_size = Precision::Inexact(total_size);
-    statistics.num_rows = Precision::Inexact(total_size);
+    statistics.num_rows = Precision::Inexact(
+        parse_hive_num_rows(table_properties)
+            .unwrap_or_else(|| estimate_num_rows(&table_schema, total_size)),
+    );
     statistics
+}
+
+fn parse_hive_num_rows(table_properties: &HashMap<String, String>) -> Option<usize> {
+    table_properties
+        .get("numRows")
+        .and_then(|num_rows| num_rows.trim().parse::<usize>().ok())
+}
+
+fn estimate_num_rows(schema: &Schema, total_size: usize) -> usize {
+    if total_size == 0 {
+        return 0;
+    }
+
+    let row_size = estimate_schema_row_size(schema);
+    total_size.saturating_div(row_size).max(1)
+}
+
+fn estimate_schema_row_size(schema: &Schema) -> usize {
+    schema
+        .fields()
+        .iter()
+        .map(|field| estimate_data_type_size(field.data_type()))
+        .fold(0usize, usize::saturating_add)
+        .max(1)
+}
+
+fn estimate_data_type_size(data_type: &DataType) -> usize {
+    const VARIABLE_TYPE_SIZE: usize = 16;
+
+    data_type.primitive_width().unwrap_or(VARIABLE_TYPE_SIZE)
 }
 
 fn build_partition_values(
@@ -808,6 +846,33 @@ mod tests {
     }
 
     #[test]
+    fn test_build_table_statistics_uses_num_rows_property() {
+        let table_schema = statistics_schema();
+        let files = vec![PartitionedFile::new("file1.parquet", 64)];
+        let table_properties = HashMap::from([("numRows".to_string(), " 42 ".to_string())]);
+
+        let statistics = build_table_statistics(table_schema, &files, &table_properties);
+
+        assert_eq!(statistics.total_byte_size, Precision::Inexact(64));
+        assert_eq!(statistics.num_rows, Precision::Inexact(42));
+    }
+
+    #[test]
+    fn test_build_table_statistics_estimates_rows_when_num_rows_missing() {
+        let table_schema = statistics_schema();
+        let files = vec![
+            PartitionedFile::new("file1.parquet", 64),
+            PartitionedFile::new("file2.parquet", 56),
+        ];
+        let table_properties = HashMap::new();
+
+        let statistics = build_table_statistics(table_schema, &files, &table_properties);
+
+        assert_eq!(statistics.total_byte_size, Precision::Inexact(120));
+        assert_eq!(statistics.num_rows, Precision::Inexact(10));
+    }
+
+    #[test]
     fn test_prune_partitions_eq() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
@@ -1021,6 +1086,13 @@ mod tests {
             Arc::new(Field::new("dt", DataType::Utf8, true)),
             Arc::new(Field::new("bucket", DataType::Int32, true)),
         ]
+    }
+
+    fn statistics_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, true),
+            Field::new("value", DataType::Int64, true),
+        ]))
     }
 
     fn sample_partitions() -> Vec<HivePartition> {
