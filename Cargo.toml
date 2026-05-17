@@ -23,8 +23,8 @@ async-trait = "0.1.88"
 url = "2.5.7"
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
 iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a", default-features = false, features = ["opendal-s3", "opendal-oss"] }
-deltalake = { git = "https://github.com/delta-io/delta-rs.git", rev = "0f68868d1dbbe77fa4e99c96df49ae121f8974e4", features = ["datafusion", "s3"] }
-deltalake-aws = { git = "https://github.com/delta-io/delta-rs.git", rev = "0f68868d1dbbe77fa4e99c96df49ae121f8974e4" }
+deltalake = { version = "0.32.2", features = ["datafusion", "s3"] }
+deltalake-aws = "0.15.0"
 dobbydb-app = { path = "src/app" }
 dobbydb-storage = {path = "src/storage"}
 dobbydb-common = {path = "src/common"}
