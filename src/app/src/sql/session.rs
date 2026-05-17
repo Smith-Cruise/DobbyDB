@@ -71,6 +71,7 @@ pub struct ExtendedSessionContext {
 impl Default for ExtendedSessionContext {
     fn default() -> Self {
         let dobbydb_context = Arc::new(DobbyDbContext {
+            server_config: Default::default(),
             catalog_manager: Arc::new(CatalogManager::default()),
             runtime_manager: Arc::new(RuntimeManager::default()),
             default_catalog: None,
@@ -355,7 +356,6 @@ mod tests {
     use super::*;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::common::assert_contains;
-    use datafusion::execution::cache::cache_manager::CacheManagerConfig;
     use datafusion::execution::runtime_env::RuntimeEnvBuilder;
     use datafusion::object_store::memory::InMemory;
     use datafusion::object_store::path::Path;
@@ -365,7 +365,6 @@ mod tests {
         InstrumentedObjectStoreMode, InstrumentedObjectStoreRegistry,
     };
     use std::sync::Arc;
-    use std::time::Duration;
     use url::Url;
 
     #[tokio::test]
@@ -505,13 +504,7 @@ mod tests {
             InstrumentedObjectStoreRegistry::new()
                 .with_profile_mode(InstrumentedObjectStoreMode::Summary),
         );
-        let cache_manager_config = CacheManagerConfig {
-            list_files_cache_limit: 5 * 1024 * 1024, // 5MB
-            list_files_cache_ttl: Some(Duration::from_hours(1)),
-            ..Default::default()
-        };
         let runtime_env = RuntimeEnvBuilder::new()
-            .with_cache_manager(cache_manager_config)
             .with_object_store_registry(instrumented_registry.clone())
             .build_arc()?;
         let dobbydb_context = Arc::new(DobbyDbContext::default());

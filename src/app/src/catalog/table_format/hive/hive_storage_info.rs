@@ -4,8 +4,7 @@ use datafusion::common::{DataFusionError, Result};
 use datafusion::datasource::table_schema::TableSchema;
 use deltalake::arrow::datatypes::{Field, Schema};
 use hive_metastore::{FieldSchema, Table as HMSTable};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
@@ -21,6 +20,7 @@ pub struct HiveStorageInfo {
     pub input_format: HiveInputFormat,
     pub table_schema: TableSchema,
     pub serde_properties: HashMap<String, String>,
+    pub table_properties: HashMap<String, String>,
 }
 
 impl HiveStorageInfo {
@@ -40,6 +40,15 @@ impl HiveStorageInfo {
                     .collect()
             })
             .unwrap_or_default();
+        let table_properties: HashMap<String, String> = table
+            .parameters
+            .as_ref()
+            .map(|p| {
+                p.iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Self::try_new(
             sd.location.as_deref(),
@@ -47,6 +56,7 @@ impl HiveStorageInfo {
             data_cols,
             table_partition_cols,
             serde_properties,
+            table_properties,
         )
     }
 
@@ -61,6 +71,8 @@ impl HiveStorageInfo {
             .and_then(|s| s.parameters())
             .cloned()
             .unwrap_or_default();
+        let table_properties: HashMap<String, String> =
+            table.parameters.as_ref().cloned().unwrap_or_default();
 
         Self::try_new(
             sd.location(),
@@ -68,6 +80,7 @@ impl HiveStorageInfo {
             data_cols,
             table_partition_cols,
             serde_properties,
+            table_properties,
         )
     }
 
@@ -92,6 +105,7 @@ impl HiveStorageInfo {
         data_cols: Vec<Arc<Field>>,
         table_partition_cols: Vec<Arc<Field>>,
         serde_properties: HashMap<String, String>,
+        table_properties: HashMap<String, String>,
     ) -> Result<Self> {
         let table_location = table_location
             .map(ToString::to_string)
@@ -110,6 +124,7 @@ impl HiveStorageInfo {
             input_format,
             table_schema: TableSchema::new(Arc::new(Schema::new(data_cols)), table_partition_cols),
             serde_properties,
+            table_properties,
         })
     }
 

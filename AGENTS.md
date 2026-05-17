@@ -1,17 +1,24 @@
 ## Project Description
 DobbyDB is a datafusion based query engine. It focuses on lakehouse query.
 
-## Supported Table Format
+### Supported Table Format
 * Iceberg (parquet)
 * Delta Lake (parquet)
 * Hive (textfile, parquet)
 
-## Supported Metastore
+### Supported Metastore
 * HMS
 * Glue
 
-## Commit Requirements
-Project's code comments, pull request must use English.
+## Agents rules
+Agents should follow below rules:
+
+* Reply based on the language used in the user's question.
+* Code's comments, commit message, pull request must use English.
+* Keep the PR descriptions as concise as possible.
+
+### Pull request checklist
+Agents should finish below checklist before pull request.
 
 Pass format check:
 ```bash
@@ -27,7 +34,3 @@ Pass tests:
 ```bash
 cargo test --all-targets --all-features --verbose
 ```
-
-## Pull Request Requirements
-* PR title and descriptions must use English.
-* Keep the PR descriptions as concise as possible.

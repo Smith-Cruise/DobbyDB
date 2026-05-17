@@ -14,7 +14,8 @@ use datafusion::catalog::memory::DataSourceExec;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::config::CsvOptions;
 use datafusion::common::parsers::CompressionTypeVariant;
-use datafusion::common::{Result, ToDFSchema};
+use datafusion::common::stats::Precision;
+use datafusion::common::{Result, Statistics, ToDFSchema};
 use datafusion::config::TableParquetOptions;
 use datafusion::datasource::TableType;
 use datafusion::datasource::file_format::file_compression_type::FileCompressionType;
@@ -27,7 +28,6 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::cache::TableScopedPath;
 use datafusion::execution::cache::cache_manager::CachedFileList;
 use datafusion::execution::object_store::ObjectStoreUrl;
-use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::object_store::path::Path;
 use datafusion::object_store::{ObjectMeta, ObjectStore};
@@ -144,6 +144,11 @@ impl TableProvider for HiveTableProvider {
             collect_partitioned_files(partition_scan_tasks, meta_fetch_concurrency).await?
         };
 
+        let statistics = build_table_statistics(
+            self.hive_storage_info.table_schema.table_schema().clone(),
+            &scan_file_list,
+            &self.hive_storage_info.table_properties,
+        );
         let file_group = FileGroup::new(scan_file_list);
 
         let exec = match &self.hive_storage_info.input_format {
@@ -152,6 +157,7 @@ impl TableProvider for HiveTableProvider {
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
                 &self.hive_storage_info.serde_properties,
+                statistics,
                 projection,
                 limit,
             ),
@@ -160,9 +166,8 @@ impl TableProvider for HiveTableProvider {
                 store_url,
                 self.hive_storage_info.table_schema.clone(),
                 file_group,
-                &filter_data_filters(filters, self.hive_storage_info.table_schema.file_schema()),
                 state,
-                self.hive_storage_info.table_schema.file_schema(),
+                statistics,
                 projection,
                 limit,
             ),
@@ -189,6 +194,7 @@ fn build_csv_exec(
     table_schema: TableSchema,
     file_group: FileGroup,
     serde_properties: &HashMap<String, String>,
+    statistics: Statistics,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
@@ -205,6 +211,7 @@ fn build_csv_exec(
 
     let source = Arc::new(CsvSource::new(table_schema).with_csv_options(options));
     let mut builder = FileScanConfigBuilder::new(store_url, source).with_file_group(file_group);
+    builder = builder.with_statistics(statistics);
     builder = builder.with_file_compression_type(file_compression);
     if let Some(proj) = projection {
         builder = builder.with_projection_indices(Some(proj.clone()))?;
@@ -216,6 +223,55 @@ fn build_csv_exec(
     Ok(DataSourceExec::from_data_source(config))
 }
 
+fn build_table_statistics(
+    table_schema: SchemaRef,
+    files: &[PartitionedFile],
+    table_properties: &HashMap<String, String>,
+) -> Statistics {
+    let total_size = files
+        .iter()
+        .map(|file| usize::try_from(file.object_meta.size).unwrap_or(usize::MAX))
+        .fold(0usize, usize::saturating_add);
+
+    let mut statistics = Statistics::new_unknown(&table_schema);
+    statistics.total_byte_size = Precision::Inexact(total_size);
+    statistics.num_rows = Precision::Inexact(
+        parse_hive_num_rows(table_properties)
+            .unwrap_or_else(|| estimate_num_rows(&table_schema, total_size)),
+    );
+    statistics
+}
+
+fn parse_hive_num_rows(table_properties: &HashMap<String, String>) -> Option<usize> {
+    table_properties
+        .get("numRows")
+        .and_then(|num_rows| num_rows.trim().parse::<usize>().ok())
+}
+
+fn estimate_num_rows(schema: &Schema, total_size: usize) -> usize {
+    if total_size == 0 {
+        return 0;
+    }
+
+    let row_size = estimate_schema_row_size(schema);
+    total_size.saturating_div(row_size).max(1)
+}
+
+fn estimate_schema_row_size(schema: &Schema) -> usize {
+    schema
+        .fields()
+        .iter()
+        .map(|field| estimate_data_type_size(field.data_type()))
+        .fold(0usize, usize::saturating_add)
+        .max(1)
+}
+
+fn estimate_data_type_size(data_type: &DataType) -> usize {
+    const VARIABLE_TYPE_SIZE: usize = 16;
+
+    data_type.primitive_width().unwrap_or(VARIABLE_TYPE_SIZE)
+}
+
 fn build_partition_values(
     partition_fields: &[Arc<datafusion::arrow::datatypes::Field>],
     partition: &HivePartition,
@@ -224,28 +280,6 @@ fn build_partition_values(
         .iter()
         .zip(partition.partition_values.iter())
         .map(|(field, val)| parse_partition_value(val, field.data_type()))
-        .collect()
-}
-
-fn filter_data_filters(filters: &[Expr], data_schema: &SchemaRef) -> Vec<Expr> {
-    if filters.is_empty() {
-        return vec![];
-    }
-
-    let data_col_name_set: HashSet<String> = data_schema
-        .fields()
-        .iter()
-        .map(|f| f.name().to_ascii_lowercase())
-        .collect();
-
-    filters
-        .iter()
-        .filter(|f| {
-            f.column_refs()
-                .iter()
-                .all(|c| data_col_name_set.contains(&c.name().to_ascii_lowercase()))
-        })
-        .cloned()
         .collect()
 }
 
@@ -327,15 +361,16 @@ fn detect_file_group_compression(file_group: &FileGroup) -> Result<CompressionTy
     ))
 }
 
+// The parquet scan builder mirrors DataFusion scan inputs, so keeping these
+// arguments explicit is clearer than wrapping them only to satisfy clippy.
 #[allow(clippy::too_many_arguments)]
 fn build_parquet_exec(
     io_handle: Handle,
     store_url: ObjectStoreUrl,
     table_schema: TableSchema,
     file_group: FileGroup,
-    filters: &[Expr],
     state: &dyn Session,
-    data_schema: &SchemaRef,
+    statistics: Statistics,
     projection: Option<&Vec<usize>>,
     limit: Option<usize>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
@@ -350,19 +385,13 @@ fn build_parquet_exec(
         io_handle,
     ));
 
-    let mut source = ParquetSource::new(table_schema)
+    let source = ParquetSource::new(table_schema)
         .with_table_parquet_options(parquet_options)
         .with_parquet_file_reader_factory(parquet_file_reader_factory);
 
-    let df_schema = data_schema.as_ref().clone().to_dfschema()?;
-    let predicate = conjunction(filters.iter().cloned())
-        .and_then(|p| state.create_physical_expr(p, &df_schema).ok());
-    if let Some(pred) = predicate {
-        source = source.with_predicate(pred);
-    }
-
     let mut builder =
         FileScanConfigBuilder::new(store_url, Arc::new(source)).with_file_group(file_group);
+    builder = builder.with_statistics(statistics);
     if let Some(proj) = projection {
         builder = builder.with_projection_indices(Some(proj.clone()))?;
     }
@@ -817,6 +846,33 @@ mod tests {
     }
 
     #[test]
+    fn test_build_table_statistics_uses_num_rows_property() {
+        let table_schema = statistics_schema();
+        let files = vec![PartitionedFile::new("file1.parquet", 64)];
+        let table_properties = HashMap::from([("numRows".to_string(), " 42 ".to_string())]);
+
+        let statistics = build_table_statistics(table_schema, &files, &table_properties);
+
+        assert_eq!(statistics.total_byte_size, Precision::Inexact(64));
+        assert_eq!(statistics.num_rows, Precision::Inexact(42));
+    }
+
+    #[test]
+    fn test_build_table_statistics_estimates_rows_when_num_rows_missing() {
+        let table_schema = statistics_schema();
+        let files = vec![
+            PartitionedFile::new("file1.parquet", 64),
+            PartitionedFile::new("file2.parquet", 56),
+        ];
+        let table_properties = HashMap::new();
+
+        let statistics = build_table_statistics(table_schema, &files, &table_properties);
+
+        assert_eq!(statistics.total_byte_size, Precision::Inexact(120));
+        assert_eq!(statistics.num_rows, Precision::Inexact(10));
+    }
+
+    #[test]
     fn test_prune_partitions_eq() {
         let state = SessionContext::new();
         let partition_fields = partition_fields();
@@ -1030,6 +1086,13 @@ mod tests {
             Arc::new(Field::new("dt", DataType::Utf8, true)),
             Arc::new(Field::new("bucket", DataType::Int32, true)),
         ]
+    }
+
+    fn statistics_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, true),
+            Field::new("value", DataType::Int64, true),
+        ]))
     }
 
     fn sample_partitions() -> Vec<HivePartition> {

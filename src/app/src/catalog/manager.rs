@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct CatalogConfigs {
     pub hms: Option<Vec<HMSCatalogConfig>>,
     pub glue: Option<Vec<GlueCatalogConfig>>,
@@ -55,26 +55,22 @@ impl CatalogManager {
         }
     }
 
-    pub fn load_config(&mut self, config_path: &str) -> Result<()> {
-        let config = std::fs::read_to_string(config_path)?;
-        let configs: CatalogConfigs = toml::from_str(&config).map_err(|e| {
-            DataFusionError::Configuration(format!("Failed to parse config: {}", e))
-        })?;
-
-        if let Some(catalogs) = configs.hms {
-            for hms_catalog in catalogs {
+    pub fn load_catalogs(&mut self, catalogs: &CatalogConfigs) -> Result<()> {
+        if let Some(ref hms_catalogs) = catalogs.hms {
+            for hms_catalog in hms_catalogs {
                 self.add_catalog(&hms_catalog.name, CatalogConfig::HMS(hms_catalog.clone()))?;
             }
         }
 
-        if let Some(catalogs) = configs.glue {
-            for glue_catalog in catalogs {
+        if let Some(ref glue_catalogs) = catalogs.glue {
+            for glue_catalog in glue_catalogs {
                 self.add_catalog(
                     &glue_catalog.name,
                     CatalogConfig::GLUE(glue_catalog.clone()),
                 )?;
             }
         }
+
         Ok(())
     }
 
@@ -97,6 +93,7 @@ impl CatalogManager {
             .get_catalog(catalog_name)
             .ok_or_else(|| DataFusionError::Plan(format!("unknown catalog {}", catalog_name)))?;
         let dobbydb_context = Arc::new(DobbyDbContext {
+            server_config: Default::default(),
             catalog_manager: Arc::new(self.clone()),
             runtime_manager: Arc::new(RuntimeManager::default()),
             default_catalog: None,
