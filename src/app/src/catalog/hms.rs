@@ -4,7 +4,7 @@ use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::table_provider_factory::{
-    TableProviderBuilder, deduce_table_format, split_table_name,
+    TableProviderBuilder, deduce_table_format, parse_table_reference,
 };
 use async_trait::async_trait;
 use datafusion::catalog::{AsyncCatalogProvider, AsyncSchemaProvider, TableProvider};
@@ -175,7 +175,7 @@ impl HMSSchema {
 #[async_trait]
 impl AsyncSchemaProvider for HMSSchema {
     async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
-        let (table_name, metadata_table_name) = split_table_name(tbl_name);
+        let (table_name, metadata_table_type) = parse_table_reference(tbl_name)?;
 
         let hms_client = build_hms_client(&self.config)?;
         let get_table_request = GetTableRequest {
@@ -193,7 +193,7 @@ impl AsyncSchemaProvider for HMSSchema {
         let table_reference = TableReference::full(
             self.config.name.as_str(),
             self.schema_name.as_str(),
-            table_name,
+            table_name.as_str(),
         );
 
         let mut hms_table_properties: HashMap<String, String> = HashMap::new();
@@ -240,7 +240,7 @@ impl AsyncSchemaProvider for HMSSchema {
             CatalogConfig::HMS(self.config.deref().clone()),
         );
         let table_provider_builder = table_provider_builder
-            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()))
+            .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
             .with_hive_partitions(hive_partitions);
         Ok(Some(table_provider_builder.build().await?))
