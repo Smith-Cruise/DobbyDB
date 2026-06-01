@@ -736,7 +736,7 @@ fn parse_partition_value(s: &str, data_type: &DataType) -> Result<ScalarValue> {
     }
 }
 
-async fn list_files(
+pub(super) async fn list_files(
     state: &dyn Session,
     object_store: &Arc<dyn ObjectStore>,
     directory_full_location: &str,

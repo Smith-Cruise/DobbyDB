@@ -7,14 +7,14 @@ use hive_metastore::{FieldSchema, Table as HMSTable};
 use std::{collections::HashMap, sync::Arc};
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HiveInputFormat {
     TextFile,
     Parquet,
     ORC,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HiveStorageInfo {
     pub table_location: String,
     pub input_format: HiveInputFormat,

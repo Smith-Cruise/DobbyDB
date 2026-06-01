@@ -109,6 +109,7 @@ impl TableProviderBuilder {
                     HiveTableProviderFactory::try_create_table_provider(
                         storage_info,
                         partitions,
+                        self.metadata_table_type,
                         self.storage,
                         io_handle,
                     )

@@ -3,7 +3,7 @@ use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use hive_metastore::Partition as HMSPartition;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HivePartition {
     pub location: String,              // partition location
     pub partition_values: Vec<String>, // same size as partition_keys
