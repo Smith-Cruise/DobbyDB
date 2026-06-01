@@ -1,3 +1,4 @@
+mod hive_file_utils;
 mod hive_metadata_table_provider;
 pub mod hive_partition;
 pub mod hive_storage_info;

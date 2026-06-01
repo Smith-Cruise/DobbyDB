@@ -1,5 +1,5 @@
+use crate::table_format::hive::hive_file_utils::list_files_by_directories;
 use crate::table_format::hive::hive_partition::HivePartition;
-use crate::table_format::hive::hive_table_provider::list_files;
 use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
 use datafusion::arrow::array::{StringArray, UInt64Array};
@@ -12,12 +12,10 @@ use datafusion::datasource::TableType;
 use datafusion::datasource::memory::MemorySourceConfig;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::object_store::{ObjectMeta, ObjectStore};
+use datafusion::object_store::ObjectMeta;
 use datafusion::physical_plan::ExecutionPlan;
 use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
-use futures::StreamExt;
 use std::any::Any;
-use std::future::Future;
 use std::sync::Arc;
 use url::Url;
 
@@ -56,47 +54,35 @@ impl HiveMetadataTableProvider {
         })
     }
 
-    async fn scan_file_path(&self, state: &dyn Session) -> Result<Vec<HiveFileMetadata>> {
+    async fn scan_file_path(&self, state: &dyn Session) -> Result<Vec<ObjectMeta>> {
         if let Some(storage) = &self.storage {
             storage.try_register_into_session(&self.table_location, state)?;
         }
 
-        let (path_schema, path_bucket) =
-            parse_location_schema_bucket(&self.table_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_bucket(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
         let object_store = state.runtime_env().object_store(&store_url)?;
-
-        if self.partitions.is_empty() {
-            return list_hive_file_metadata(
-                state,
-                &object_store,
-                &self.table_location,
-            )
-            .await;
-        }
-
         let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
-        let partition_locations = self
-            .partitions
-            .iter()
-            .map(|partition| partition.location.clone())
-            .collect::<Vec<_>>();
-        let partition_scan_tasks = partition_locations.into_iter().map(|location| {
-            let object_store = Arc::clone(&object_store);
 
-            async move { list_hive_file_metadata(state, &object_store, &location).await }
-        });
+        let dir_locations = if self.partitions.is_empty() {
+            vec![self.table_location.clone()]
+        } else {
+            self.partitions
+                .iter()
+                .map(|partition| partition.location.clone())
+                .collect()
+        };
 
-        collect_metadata_files(partition_scan_tasks, meta_fetch_concurrency).await
+        list_files_by_directories(state, &object_store, dir_locations, meta_fetch_concurrency).await
     }
 
-    fn build_file_path_batch(&self, files: Vec<HiveFileMetadata>) -> Result<RecordBatch> {
-        let file_paths = StringArray::from(
-            files
-                .iter()
-                .map(|file| file.path.as_str())
-                .collect::<Vec<_>>(),
-        );
+    fn build_file_path_batch(&self, files: Vec<ObjectMeta>) -> Result<RecordBatch> {
+        let full_paths = files
+            .iter()
+            .map(|file| object_meta_full_location(&self.table_location, file))
+            .collect::<Result<Vec<_>>>()?;
+        let file_paths =
+            StringArray::from(full_paths.iter().map(|p| p.as_str()).collect::<Vec<_>>());
         let file_sizes = UInt64Array::from(files.iter().map(|file| file.size).collect::<Vec<_>>());
 
         RecordBatch::try_new(
@@ -166,37 +152,8 @@ fn file_path_schema() -> SchemaRef {
     ]))
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct HiveFileMetadata {
-    path: String,
-    size: u64,
-}
-
-async fn list_hive_file_metadata(
-    state: &dyn Session,
-    object_store: &Arc<dyn ObjectStore>,
-    directory_full_location: &str,
-) -> Result<Vec<HiveFileMetadata>> {
-    let files = list_files(state, object_store, directory_full_location).await?;
-    files
-        .into_iter()
-        .map(|file| object_meta_to_hive_file_metadata(directory_full_location, file))
-        .collect()
-}
-
-fn object_meta_to_hive_file_metadata(
-    directory_full_location: &str,
-    file: ObjectMeta,
-) -> Result<HiveFileMetadata> {
-    Ok(HiveFileMetadata {
-        path: object_meta_full_location(directory_full_location, &file)?,
-        size: file.size,
-    })
-}
-
-fn object_meta_full_location(directory_full_location: &str, file: &ObjectMeta) -> Result<String> {
-    let parsed =
-        Url::parse(directory_full_location).map_err(|e| DataFusionError::External(e.into()))?;
+fn object_meta_full_location(base_location: &str, file: &ObjectMeta) -> Result<String> {
+    let parsed = Url::parse(base_location).map_err(|e| DataFusionError::External(e.into()))?;
     let bucket_location = match parsed.host_str() {
         Some(host) => format!("{}://{}", parsed.scheme(), host),
         None => format!("{}://", parsed.scheme()),
@@ -209,28 +166,11 @@ fn object_meta_full_location(directory_full_location: &str, file: &ObjectMeta) -
     ))
 }
 
-async fn collect_metadata_files<I, Fut>(
-    tasks: I,
-    concurrency: usize,
-) -> Result<Vec<HiveFileMetadata>>
-where
-    I: IntoIterator<Item = Fut>,
-    Fut: Future<Output = Result<Vec<HiveFileMetadata>>>,
-{
-    let files = futures::stream::iter(tasks)
-        .buffer_unordered(concurrency)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(files.into_iter().flatten().collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use datafusion::arrow::array::Array;
+    use datafusion::object_store::ObjectStore;
     use datafusion::object_store::ObjectStoreExt;
     use datafusion::object_store::memory::InMemory;
     use datafusion::object_store::path::Path;
@@ -248,10 +188,10 @@ mod tests {
         let files = provider.scan_file_path(&ctx.state()).await.unwrap();
 
         assert_eq!(
-            sorted_files(files),
+            sorted_files(&files),
             vec![
-                ("s3://warehouse/hive/table/file1.parquet".to_string(), 3),
-                ("s3://warehouse/hive/table/file2.parquet".to_string(), 5),
+                ("hive/table/file1.parquet", 3),
+                ("hive/table/file2.parquet", 5),
             ]
         );
     }
@@ -279,16 +219,10 @@ mod tests {
         let files = provider.scan_file_path(&ctx.state()).await.unwrap();
 
         assert_eq!(
-            sorted_files(files),
+            sorted_files(&files),
             vec![
-                (
-                    "s3://warehouse/hive/table/dt=2024-01-01/file1.parquet".to_string(),
-                    1,
-                ),
-                (
-                    "s3://warehouse/hive/table/dt=2024-01-02/file2.parquet".to_string(),
-                    2,
-                ),
+                ("hive/table/dt=2024-01-01/file1.parquet", 1),
+                ("hive/table/dt=2024-01-02/file2.parquet", 2),
             ]
         );
     }
@@ -305,10 +239,7 @@ mod tests {
         let provider = test_provider("s3://warehouse/hive/table", vec![]);
         let files = provider.scan_file_path(&ctx.state()).await.unwrap();
 
-        assert_eq!(
-            sorted_files(files),
-            vec![("s3://warehouse/hive/table/file1.parquet".to_string(), 1)]
-        );
+        assert_eq!(sorted_files(&files), vec![("hive/table/file1.parquet", 1)]);
     }
 
     #[tokio::test]
@@ -368,12 +299,12 @@ mod tests {
             .unwrap();
     }
 
-    fn sorted_files(files: Vec<HiveFileMetadata>) -> Vec<(String, u64)> {
-        let mut files = files
-            .into_iter()
-            .map(|file| (file.path, file.size))
-            .collect::<Vec<_>>();
-        files.sort();
-        files
+    fn sorted_files(files: &[ObjectMeta]) -> Vec<(&str, u64)> {
+        let mut result: Vec<_> = files
+            .iter()
+            .map(|file| (file.location.as_ref(), file.size))
+            .collect();
+        result.sort();
+        result
     }
 }
