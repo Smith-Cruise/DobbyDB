@@ -1,5 +1,4 @@
 use crate::table_format::hive::hive_partition::HivePartition;
-use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::hive::hive_table_provider::list_files;
 use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
@@ -24,7 +23,7 @@ use url::Url;
 
 #[derive(Debug)]
 pub struct HiveMetadataTableProvider {
-    hive_storage_info: HiveStorageInfo,
+    table_location: String,
     partitions: Vec<HivePartition>,
     metadata_table_type: MetadataTableType,
     storage: Option<Storage>,
@@ -33,7 +32,7 @@ pub struct HiveMetadataTableProvider {
 
 impl HiveMetadataTableProvider {
     pub fn try_new(
-        hive_storage_info: HiveStorageInfo,
+        table_location: String,
         partitions: Vec<HivePartition>,
         metadata_table_type: MetadataTableType,
         storage: Option<Storage>,
@@ -49,7 +48,7 @@ impl HiveMetadataTableProvider {
         };
 
         Ok(Self {
-            hive_storage_info,
+            table_location,
             partitions,
             metadata_table_type,
             storage,
@@ -59,11 +58,11 @@ impl HiveMetadataTableProvider {
 
     async fn scan_file_path(&self, state: &dyn Session) -> Result<Vec<HiveFileMetadata>> {
         if let Some(storage) = &self.storage {
-            storage.try_register_into_session(&self.hive_storage_info.table_location, state)?;
+            storage.try_register_into_session(&self.table_location, state)?;
         }
 
         let (path_schema, path_bucket) =
-            parse_location_schema_bucket(&self.hive_storage_info.table_location)?;
+            parse_location_schema_bucket(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
         let object_store = state.runtime_env().object_store(&store_url)?;
 
@@ -71,7 +70,7 @@ impl HiveMetadataTableProvider {
             return list_hive_file_metadata(
                 state,
                 &object_store,
-                &self.hive_storage_info.table_location,
+                &self.table_location,
             )
             .await;
         }
@@ -232,14 +231,11 @@ where
 mod tests {
     use super::*;
     use datafusion::arrow::array::Array;
-    use datafusion::arrow::datatypes::Schema;
-    use datafusion::datasource::table_schema::TableSchema;
     use datafusion::object_store::ObjectStoreExt;
     use datafusion::object_store::memory::InMemory;
     use datafusion::object_store::path::Path;
     use datafusion::physical_plan::collect;
     use datafusion::prelude::SessionContext;
-    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_scan_file_path_metadata_for_unpartitioned_table() {
@@ -357,22 +353,12 @@ mod tests {
         partitions: Vec<HivePartition>,
     ) -> HiveMetadataTableProvider {
         HiveMetadataTableProvider::try_new(
-            test_storage_info(table_location),
+            table_location.to_string(),
             partitions,
             MetadataTableType::FilePath,
             None,
         )
         .unwrap()
-    }
-
-    fn test_storage_info(table_location: &str) -> HiveStorageInfo {
-        HiveStorageInfo {
-            table_location: table_location.to_string(),
-            input_format: crate::table_format::hive::hive_storage_info::HiveInputFormat::Parquet,
-            table_schema: TableSchema::new(Arc::new(Schema::empty()), vec![]),
-            serde_properties: HashMap::new(),
-            table_properties: HashMap::new(),
-        }
     }
 
     async fn put_test_object(store: &Arc<dyn ObjectStore>, path: &str, data: &[u8]) {

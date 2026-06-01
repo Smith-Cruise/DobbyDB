@@ -28,7 +28,7 @@ impl HiveTableProviderFactory {
         match metadata_table_type {
             Some(metadata_table_type) => {
                 let provider = HiveMetadataTableProvider::try_new(
-                    info,
+                    info.table_location,
                     partitions,
                     metadata_table_type,
                     storage,
