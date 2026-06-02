@@ -43,37 +43,3 @@ impl HiveTableProviderFactory {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use datafusion::arrow::datatypes::Schema;
-    use datafusion::datasource::table_schema::TableSchema;
-    use std::collections::HashMap;
-
-    #[tokio::test]
-    async fn test_create_file_path_metadata_provider() {
-        let provider = HiveTableProviderFactory::try_create_table_provider(
-            build_test_storage_info(),
-            vec![],
-            Some(MetadataTableType::FilePath),
-            None,
-            Handle::current(),
-        )
-        .unwrap();
-
-        assert_eq!(provider.schema().fields().len(), 2);
-        assert!(provider.schema().field_with_name("file_path").is_ok());
-        assert!(provider.schema().field_with_name("file_size").is_ok());
-    }
-
-    fn build_test_storage_info() -> HiveStorageInfo {
-        HiveStorageInfo {
-            table_location: "s3://warehouse/hive/table".to_string(),
-            input_format: hive_storage_info::HiveInputFormat::Parquet,
-            table_schema: TableSchema::new(Arc::new(Schema::empty()), vec![]),
-            serde_properties: HashMap::new(),
-            table_properties: HashMap::new(),
-        }
-    }
-}

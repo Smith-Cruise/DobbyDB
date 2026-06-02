@@ -6,12 +6,11 @@ use deltalake::arrow::datatypes::{Field, Schema};
 use hive_metastore::{FieldSchema, Table as HMSTable};
 use std::{collections::HashMap, sync::Arc};
 
-#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
 pub enum HiveInputFormat {
     TextFile,
     Parquet,
-    ORC,
+    Orc,
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +89,7 @@ impl HiveStorageInfo {
         } else if input_format.to_lowercase().contains("parquet") {
             Ok(HiveInputFormat::Parquet)
         } else if input_format.to_lowercase().contains("orc") {
-            Ok(HiveInputFormat::ORC)
+            Ok(HiveInputFormat::Orc)
         } else {
             Err(DataFusionError::NotImplemented(format!(
                 "unsupported Hive input format: {}",

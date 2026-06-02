@@ -54,7 +54,7 @@ impl HiveMetadataTableProvider {
         })
     }
 
-    async fn scan_file_path(&self, state: &dyn Session) -> Result<Vec<ObjectMeta>> {
+    async fn retrieve_table_data_file_path(&self, state: &dyn Session) -> Result<Vec<ObjectMeta>> {
         if let Some(storage) = &self.storage {
             storage.try_register_into_session(&self.table_location, state)?;
         }
@@ -62,7 +62,6 @@ impl HiveMetadataTableProvider {
         let (path_schema, path_bucket) = parse_location_schema_bucket(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
         let object_store = state.runtime_env().object_store(&store_url)?;
-        let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
 
         let dir_locations = if self.partitions.is_empty() {
             vec![self.table_location.clone()]
@@ -73,23 +72,7 @@ impl HiveMetadataTableProvider {
                 .collect()
         };
 
-        list_files_by_directories(state, &object_store, dir_locations, meta_fetch_concurrency).await
-    }
-
-    fn build_file_path_batch(&self, files: Vec<ObjectMeta>) -> Result<RecordBatch> {
-        let full_paths = files
-            .iter()
-            .map(|file| object_meta_full_location(&self.table_location, file))
-            .collect::<Result<Vec<_>>>()?;
-        let file_paths =
-            StringArray::from(full_paths.iter().map(|p| p.as_str()).collect::<Vec<_>>());
-        let file_sizes = UInt64Array::from(files.iter().map(|file| file.size).collect::<Vec<_>>());
-
-        RecordBatch::try_new(
-            Arc::clone(&self.schema),
-            vec![Arc::new(file_paths), Arc::new(file_sizes)],
-        )
-        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
+        list_files_by_directories(state, &object_store, dir_locations).await
     }
 }
 
@@ -116,11 +99,15 @@ impl TableProvider for HiveMetadataTableProvider {
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let batch = match self.metadata_table_type {
             MetadataTableType::FilePath => {
-                let mut files = self.scan_file_path(state).await?;
+                let mut files = self.retrieve_table_data_file_path(state).await?;
                 if let Some(limit) = limit {
                     files.truncate(limit);
                 }
-                self.build_file_path_batch(files)?
+                convert_object_meta_to_record_batch(
+                    self.schema.clone(),
+                    &self.table_location,
+                    files,
+                )?
             }
             _ => {
                 return Err(DataFusionError::NotImplemented(format!(
@@ -166,6 +153,22 @@ fn object_meta_full_location(base_location: &str, file: &ObjectMeta) -> Result<S
     ))
 }
 
+fn convert_object_meta_to_record_batch(
+    schema: SchemaRef,
+    table_location: &String,
+    files: Vec<ObjectMeta>,
+) -> Result<RecordBatch> {
+    let full_paths = files
+        .iter()
+        .map(|file| object_meta_full_location(table_location, file))
+        .collect::<Result<Vec<_>>>()?;
+    let file_paths = StringArray::from(full_paths.iter().map(|p| p.as_str()).collect::<Vec<_>>());
+    let file_sizes = UInt64Array::from(files.iter().map(|file| file.size).collect::<Vec<_>>());
+
+    RecordBatch::try_new(schema, vec![Arc::new(file_paths), Arc::new(file_sizes)])
+        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,12 +183,15 @@ mod tests {
     #[tokio::test]
     async fn test_scan_file_path_metadata_for_unpartitioned_table() {
         let ctx = session_context_with_store();
-        let store = test_store(&ctx);
+        let store = build_test_object_store(&ctx);
         put_test_object(&store, "hive/table/file1.parquet", b"123").await;
         put_test_object(&store, "hive/table/file2.parquet", b"12345").await;
 
-        let provider = test_provider("s3://warehouse/hive/table", vec![]);
-        let files = provider.scan_file_path(&ctx.state()).await.unwrap();
+        let provider = build_test_hive_table_metadata_provider("s3://warehouse/hive/table", vec![]);
+        let files = provider
+            .retrieve_table_data_file_path(&ctx.state())
+            .await
+            .unwrap();
 
         assert_eq!(
             sorted_files(&files),
@@ -199,11 +205,11 @@ mod tests {
     #[tokio::test]
     async fn test_scan_file_path_metadata_for_partitioned_table() {
         let ctx = session_context_with_store();
-        let store = test_store(&ctx);
+        let store = build_test_object_store(&ctx);
         put_test_object(&store, "hive/table/dt=2024-01-01/file1.parquet", b"1").await;
         put_test_object(&store, "hive/table/dt=2024-01-02/file2.parquet", b"22").await;
 
-        let provider = test_provider(
+        let provider = build_test_hive_table_metadata_provider(
             "s3://warehouse/hive/table",
             vec![
                 HivePartition {
@@ -216,7 +222,10 @@ mod tests {
                 },
             ],
         );
-        let files = provider.scan_file_path(&ctx.state()).await.unwrap();
+        let files = provider
+            .retrieve_table_data_file_path(&ctx.state())
+            .await
+            .unwrap();
 
         assert_eq!(
             sorted_files(&files),
@@ -230,14 +239,17 @@ mod tests {
     #[tokio::test]
     async fn test_scan_file_path_metadata_filters_hidden_and_empty_files() {
         let ctx = session_context_with_store();
-        let store = test_store(&ctx);
+        let store = build_test_object_store(&ctx);
         put_test_object(&store, "hive/table/file1.parquet", b"1").await;
         put_test_object(&store, "hive/table/_temporary", b"1").await;
         put_test_object(&store, "hive/table/.metadata", b"1").await;
         put_test_object(&store, "hive/table/empty.parquet", b"").await;
 
-        let provider = test_provider("s3://warehouse/hive/table", vec![]);
-        let files = provider.scan_file_path(&ctx.state()).await.unwrap();
+        let provider = build_test_hive_table_metadata_provider("s3://warehouse/hive/table", vec![]);
+        let files = provider
+            .retrieve_table_data_file_path(&ctx.state())
+            .await
+            .unwrap();
 
         assert_eq!(sorted_files(&files), vec![("hive/table/file1.parquet", 1)]);
     }
@@ -245,11 +257,11 @@ mod tests {
     #[tokio::test]
     async fn test_file_path_metadata_scan_applies_projection_and_limit() {
         let ctx = session_context_with_store();
-        let store = test_store(&ctx);
+        let store = build_test_object_store(&ctx);
         put_test_object(&store, "hive/table/file1.parquet", b"123").await;
         put_test_object(&store, "hive/table/file2.parquet", b"12345").await;
 
-        let provider = test_provider("s3://warehouse/hive/table", vec![]);
+        let provider = build_test_hive_table_metadata_provider("s3://warehouse/hive/table", vec![]);
         let projection = vec![1];
         let plan = provider
             .scan(&ctx.state(), Some(&projection), &[], Some(1))
@@ -273,13 +285,13 @@ mod tests {
         ctx
     }
 
-    fn test_store(ctx: &SessionContext) -> Arc<dyn ObjectStore> {
+    fn build_test_object_store(ctx: &SessionContext) -> Arc<dyn ObjectStore> {
         ctx.runtime_env()
             .object_store(ObjectStoreUrl::parse("s3://warehouse").unwrap())
             .unwrap()
     }
 
-    fn test_provider(
+    fn build_test_hive_table_metadata_provider(
         table_location: &str,
         partitions: Vec<HivePartition>,
     ) -> HiveMetadataTableProvider {

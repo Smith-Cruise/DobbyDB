@@ -98,7 +98,6 @@ impl TableProvider for HiveTableProvider {
                 state,
                 &object_store,
                 vec![self.hive_storage_info.table_location.clone()],
-                meta_fetch_concurrency,
             )
             .await?;
             file_object_metas
@@ -178,7 +177,7 @@ impl TableProvider for HiveTableProvider {
                 projection,
                 limit,
             ),
-            HiveInputFormat::ORC => {
+            HiveInputFormat::Orc => {
                 return Err(DataFusionError::NotImplemented(
                     "orc not implemented".to_string(),
                 ));

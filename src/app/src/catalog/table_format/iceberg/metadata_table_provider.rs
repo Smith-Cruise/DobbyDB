@@ -1,5 +1,5 @@
 use crate::table_format::iceberg::metadata_scan::IcebergMetadataScan;
-use crate::table_format::metadata_table::MetadataTableType as DobbyMetadataTableType;
+use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -26,12 +26,12 @@ pub(crate) struct IcebergMetadataTableProvider {
 impl IcebergMetadataTableProvider {
     pub fn try_new(
         table: Table,
-        metadata_table_type: DobbyMetadataTableType,
+        metadata_table_type: MetadataTableType,
     ) -> Result<IcebergMetadataTableProvider> {
         let metadata_table_type = match metadata_table_type {
-            DobbyMetadataTableType::Snapshots => IcebergMetadataTableType::Snapshots,
-            DobbyMetadataTableType::Manifests => IcebergMetadataTableType::Manifests,
-            DobbyMetadataTableType::FilePath => {
+            MetadataTableType::Snapshots => IcebergMetadataTableType::Snapshots,
+            MetadataTableType::Manifests => IcebergMetadataTableType::Manifests,
+            MetadataTableType::FilePath => {
                 return Err(DataFusionError::NotImplemented(
                     "iceberg metadata table file_path is not supported".to_string(),
                 ));

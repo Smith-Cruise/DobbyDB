@@ -12,8 +12,8 @@ pub(super) async fn list_files_by_directories(
     state: &dyn Session,
     object_store: &Arc<dyn ObjectStore>,
     dir_locations: Vec<String>,
-    concurrency: usize,
 ) -> Result<Vec<ObjectMeta>> {
+    let concurrency = state.config_options().execution.meta_fetch_concurrency;
     let tasks = dir_locations.into_iter().map(|location| {
         let object_store = Arc::clone(object_store);
 
@@ -98,14 +98,11 @@ mod tests {
             path.as_ref(),
             "hive/tpch_hive.db/textfile_no_partition_table"
         );
-    }
 
-    #[test]
-    fn test_location_to_object_store_path_with_partition() {
         let path = location_to_object_store_path(
             "s3://warehouse/hive/tpch_hive.db/textfile_partition_table/p=1",
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(
             path.as_ref(),
             "hive/tpch_hive.db/textfile_partition_table/p=1"
@@ -179,7 +176,6 @@ mod tests {
                 "memory:///table/dt=2024-01-01".to_string(),
                 "memory:///table/dt=2024-01-02".to_string(),
             ],
-            2,
         )
         .await
         .unwrap();
