@@ -1,5 +1,6 @@
 use crate::data_file_format::parquet::ExtendedParquetFileReaderFactory;
 use crate::table_format::hive::HiveStorageInfo;
+use crate::table_format::hive::hive_file_utils::{list_files, list_files_by_directories};
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveInputFormat;
 use async_trait::async_trait;
@@ -25,23 +26,16 @@ use datafusion::datasource::physical_plan::{
 };
 use datafusion::datasource::table_schema::TableSchema;
 use datafusion::error::DataFusionError;
-use datafusion::execution::cache::TableScopedPath;
-use datafusion::execution::cache::cache_manager::CachedFileList;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::object_store::path::Path;
-use datafusion::object_store::{ObjectMeta, ObjectStore};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
 use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
 use futures::StreamExt;
-use futures::stream;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use url::Url;
 
 #[derive(Debug)]
 pub struct HiveTableProvider {
@@ -97,13 +91,18 @@ impl TableProvider for HiveTableProvider {
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
 
         let object_store = state.runtime_env().object_store(&store_url)?;
+        let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
 
         let scan_file_list: Vec<PartitionedFile> = if self.partitions.is_empty() {
-            let file_object_metas =
-                list_files(state, &object_store, &self.hive_storage_info.table_location).await?;
+            let file_object_metas = list_files_by_directories(
+                state,
+                &object_store,
+                vec![self.hive_storage_info.table_location.clone()],
+            )
+            .await?;
             file_object_metas
-                .iter()
-                .map(|file_object_meta| PartitionedFile::from(file_object_meta.clone()))
+                .into_iter()
+                .map(PartitionedFile::from)
                 .collect()
         } else {
             let selected_partition_indices = prune_partitions(
@@ -113,7 +112,6 @@ impl TableProvider for HiveTableProvider {
                 state,
             )?;
 
-            let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
             let partition_scan_tasks = selected_partition_indices
                 .into_iter()
                 .map(|partition_idx| {
@@ -127,7 +125,7 @@ impl TableProvider for HiveTableProvider {
 
                     Ok(async move {
                         let file_object_metas = list_files(state, &object_store, &location).await?;
-                        let partitioned_files = file_object_metas
+                        let partitioned_files: Vec<_> = file_object_metas
                             .into_iter()
                             .map(|file_object_meta| {
                                 let mut partitioned_file = PartitionedFile::from(file_object_meta);
@@ -141,7 +139,15 @@ impl TableProvider for HiveTableProvider {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            collect_partitioned_files(partition_scan_tasks, meta_fetch_concurrency).await?
+            futures::stream::iter(partition_scan_tasks)
+                .buffer_unordered(meta_fetch_concurrency)
+                .collect::<Vec<_>>()
+                .await
+                .into_iter()
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect()
         };
 
         let statistics = build_table_statistics(
@@ -171,7 +177,7 @@ impl TableProvider for HiveTableProvider {
                 projection,
                 limit,
             ),
-            HiveInputFormat::ORC => {
+            HiveInputFormat::Orc => {
                 return Err(DataFusionError::NotImplemented(
                     "orc not implemented".to_string(),
                 ));
@@ -736,114 +742,14 @@ fn parse_partition_value(s: &str, data_type: &DataType) -> Result<ScalarValue> {
     }
 }
 
-async fn list_files(
-    state: &dyn Session,
-    object_store: &Arc<dyn ObjectStore>,
-    directory_full_location: &str,
-) -> Result<Vec<ObjectMeta>> {
-    let relative_path = location_to_object_store_path(directory_full_location)?;
-    let cache_key = TableScopedPath {
-        table: None,
-        path: relative_path.clone(),
-    };
-
-    let list_files_cache = state.runtime_env().cache_manager.get_list_files_cache();
-    if let Some(cache) = &list_files_cache
-        && let Some(cached_files) = cache.get(&cache_key)
-    {
-        return Ok(cached_files.files.as_ref().clone());
-    }
-
-    let file_object_metas: Vec<_> = object_store
-        .list(Some(&relative_path))
-        .collect::<Vec<_>>()
-        .await;
-
-    let mut results = Vec::new();
-    for file_object_meta in file_object_metas {
-        let meta = file_object_meta.map_err(|e| DataFusionError::External(Box::new(e)))?;
-        let file_name = meta.location.filename().unwrap_or("");
-
-        // ignore empty object
-        if meta.size == 0 {
-            continue;
-        }
-
-        // ignore hidden file
-        if file_name.starts_with('_') || file_name.starts_with('.') {
-            continue;
-        }
-        results.push(meta);
-    }
-
-    if let Some(cache) = list_files_cache {
-        cache.put(&cache_key, CachedFileList::new(results.clone()));
-    }
-
-    Ok(results)
-}
-
-async fn collect_partitioned_files<I, Fut>(
-    tasks: I,
-    concurrency: usize,
-) -> Result<Vec<PartitionedFile>>
-where
-    I: IntoIterator<Item = Fut>,
-    Fut: Future<Output = Result<Vec<PartitionedFile>>>,
-{
-    let partitioned_files = stream::iter(tasks)
-        .buffer_unordered(concurrency)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(partitioned_files.into_iter().flatten().collect())
-}
-
-fn location_to_object_store_path(location: &str) -> Result<Path> {
-    let parsed = Url::parse(location).map_err(|e| DataFusionError::External(e.into()))?;
-    Ok(Path::from(parsed.path().trim_start_matches('/')))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use datafusion::arrow::datatypes::Field;
     use datafusion::logical_expr::expr::InList;
     use datafusion::logical_expr::{Expr, Operator, binary_expr, col, lit};
-    use datafusion::object_store::ObjectStoreExt;
-    use datafusion::object_store::memory::InMemory;
     use datafusion::prelude::SessionContext;
     use std::collections::HashMap;
-    use std::pin::Pin;
-    use tokio::time::{Duration, sleep};
-
-    type PartitionedFileTask = Pin<Box<dyn Future<Output = Result<Vec<PartitionedFile>>>>>;
-
-    #[test]
-    fn test_location_to_object_store_path() {
-        let path = location_to_object_store_path(
-            "s3://warehouse/hive/tpch_hive.db/textfile_no_partition_table",
-        )
-        .unwrap();
-        assert_eq!(
-            path.as_ref(),
-            "hive/tpch_hive.db/textfile_no_partition_table"
-        );
-    }
-
-    #[test]
-    fn test_location_to_object_store_path_with_partition() {
-        let path = location_to_object_store_path(
-            "s3://warehouse/hive/tpch_hive.db/textfile_partition_table/p=1",
-        )
-        .unwrap();
-        assert_eq!(
-            path.as_ref(),
-            "hive/tpch_hive.db/textfile_partition_table/p=1"
-        );
-    }
 
     #[test]
     fn test_build_table_statistics_uses_num_rows_property() {
@@ -1133,155 +1039,5 @@ mod tests {
                 ],
             },
         ]
-    }
-
-    async fn put_test_object(store: &Arc<dyn ObjectStore>, path: &str, data: &[u8]) {
-        store
-            .put(&Path::from(path), data.to_vec().into())
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_collect_partitioned_files_preserves_partition_values() {
-        let ctx = SessionContext::new();
-        let state = ctx.state();
-        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
-        put_test_object(&store, "table/dt=2024-01-02/file2.parquet", b"b").await;
-
-        let tasks: Vec<PartitionedFileTask> = vec![
-            {
-                let store = Arc::clone(&store);
-                let state = state.clone();
-                Box::pin(async move {
-                    sleep(Duration::from_millis(30)).await;
-                    let partition_values = vec![ScalarValue::Utf8(Some("2024-01-01".to_string()))];
-                    let files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
-                        .await?
-                        .into_iter()
-                        .map(|file_object_meta| {
-                            let mut partitioned_file = PartitionedFile::from(file_object_meta);
-                            partitioned_file.partition_values = partition_values.clone();
-                            partitioned_file
-                        })
-                        .collect();
-                    Ok(files)
-                })
-            },
-            {
-                let store = Arc::clone(&store);
-                let state = state.clone();
-                Box::pin(async move {
-                    let partition_values = vec![ScalarValue::Utf8(Some("2024-01-02".to_string()))];
-                    let files = list_files(&state, &store, "memory:///table/dt=2024-01-02")
-                        .await?
-                        .into_iter()
-                        .map(|file_object_meta| {
-                            let mut partitioned_file = PartitionedFile::from(file_object_meta);
-                            partitioned_file.partition_values = partition_values.clone();
-                            partitioned_file
-                        })
-                        .collect();
-                    Ok(files)
-                })
-            },
-        ];
-
-        let files = collect_partitioned_files(tasks, 2).await.unwrap();
-
-        assert_eq!(files.len(), 2);
-        let file_to_partition_values: HashMap<&str, Vec<ScalarValue>> = files
-            .iter()
-            .map(|file| {
-                (
-                    file.object_meta.location.as_ref(),
-                    file.partition_values.clone(),
-                )
-            })
-            .collect();
-
-        assert_eq!(
-            file_to_partition_values.get("table/dt=2024-01-01/file1.parquet"),
-            Some(&vec![ScalarValue::Utf8(Some("2024-01-01".to_string()))])
-        );
-        assert_eq!(
-            file_to_partition_values.get("table/dt=2024-01-02/file2.parquet"),
-            Some(&vec![ScalarValue::Utf8(Some("2024-01-02".to_string()))])
-        );
-    }
-
-    #[tokio::test]
-    async fn test_collect_partitioned_files_fail_fast_on_partition_error() {
-        let tasks: Vec<PartitionedFileTask> = vec![
-            Box::pin(async {
-                sleep(Duration::from_millis(20)).await;
-                Ok(Vec::<PartitionedFile>::new())
-            }),
-            Box::pin(async {
-                Err(DataFusionError::Internal(
-                    "failed to list one partition".to_string(),
-                ))
-            }),
-        ];
-
-        let err = collect_partitioned_files(tasks, 2).await.unwrap_err();
-
-        assert!(err.to_string().contains("failed to list one partition"));
-    }
-
-    #[tokio::test]
-    async fn test_list_files_filters_hidden_and_empty_objects() {
-        let ctx = SessionContext::new();
-        let state = ctx.state();
-        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
-        put_test_object(&store, "table/dt=2024-01-01/_temporary", b"a").await;
-        put_test_object(&store, "table/dt=2024-01-01/.metadata", b"a").await;
-        put_test_object(&store, "table/dt=2024-01-01/empty.parquet", b"").await;
-
-        let files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
-            .await
-            .unwrap();
-
-        assert_eq!(files.len(), 1);
-        assert_eq!(
-            files[0].location.as_ref(),
-            "table/dt=2024-01-01/file1.parquet"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_list_files_reuses_cached_file_list() {
-        let ctx = SessionContext::new();
-        let state = ctx.state();
-        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        put_test_object(&store, "table/dt=2024-01-01/file1.parquet", b"a").await;
-
-        // The first listing populates the file list cache for this session.
-        let first_files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
-            .await
-            .unwrap();
-        assert_eq!(first_files.len(), 1);
-
-        put_test_object(&store, "table/dt=2024-01-01/file2.parquet", b"b").await;
-
-        let fresh_ctx = SessionContext::new();
-        let fresh_state = fresh_ctx.state();
-        // A fresh session has an empty cache, so it verifies the object store now has both files.
-        let uncached_files = list_files(&fresh_state, &store, "memory:///table/dt=2024-01-01")
-            .await
-            .unwrap();
-        assert_eq!(uncached_files.len(), 2);
-
-        // The original session should still reuse the cached listing and return only file1.
-        let cached_files = list_files(&state, &store, "memory:///table/dt=2024-01-01")
-            .await
-            .unwrap();
-        assert_eq!(cached_files.len(), 1);
-        assert_eq!(
-            cached_files[0].location.as_ref(),
-            "table/dt=2024-01-01/file1.parquet"
-        );
     }
 }

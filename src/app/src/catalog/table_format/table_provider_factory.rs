@@ -6,6 +6,7 @@ use crate::table_format::hive::HiveTableProviderFactory;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
+use crate::table_format::metadata_table::MetadataTableType;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
@@ -19,7 +20,7 @@ pub struct TableProviderBuilder {
     table_reference: TableReference,
     table_properties: HashMap<String, String>,
     table_format: TableFormat,
-    metadata_table_name: Option<String>,
+    metadata_table_type: Option<MetadataTableType>,
     hive_storage_info: Option<HiveStorageInfo>,
     hive_partitions: Option<Vec<HivePartition>>,
     storage: Option<Storage>,
@@ -45,15 +46,18 @@ impl TableProviderBuilder {
             table_reference,
             table_properties,
             table_format,
-            metadata_table_name: None,
+            metadata_table_type: None,
             hive_storage_info: None,
             hive_partitions: None,
             storage,
         }
     }
 
-    pub fn with_table_metadata_table_name(mut self, metadata_table_name: Option<String>) -> Self {
-        self.metadata_table_name = metadata_table_name;
+    pub fn with_metadata_table_type(
+        mut self,
+        metadata_table_type: Option<MetadataTableType>,
+    ) -> Self {
+        self.metadata_table_type = metadata_table_type;
         self
     }
 
@@ -82,7 +86,7 @@ impl TableProviderBuilder {
                 IcebergTableProviderFactory::try_create_table_provider(
                     self.table_reference,
                     iceberg_metadata_location.clone(),
-                    self.metadata_table_name,
+                    self.metadata_table_type,
                     self.storage,
                 )
                 .await
@@ -105,6 +109,7 @@ impl TableProviderBuilder {
                     HiveTableProviderFactory::try_create_table_provider(
                         storage_info,
                         partitions,
+                        self.metadata_table_type,
                         self.storage,
                         io_handle,
                     )
@@ -117,13 +122,22 @@ impl TableProviderBuilder {
     }
 }
 
-pub fn split_table_name(tbl_name: &str) -> (&str, Option<&str>) {
-    match tbl_name.split_once("$") {
-        Some((tmp_table_name, tmp_metadata_table_name)) => {
-            (tmp_table_name, Some(tmp_metadata_table_name))
-        }
+pub fn parse_table_reference(tbl_name: &str) -> Result<(String, Option<MetadataTableType>)> {
+    let (table_name, metadata_table_name) = match tbl_name.split_once("$") {
+        Some((table_name, metadata_table_name)) => (table_name, Some(metadata_table_name)),
         None => (tbl_name, None),
+    };
+
+    if table_name.is_empty() {
+        return Err(DataFusionError::Plan("table name can't be empty".into()));
     }
+
+    let metadata_table_type = metadata_table_name
+        .map(MetadataTableType::try_from)
+        .transpose()
+        .map_err(DataFusionError::Plan)?;
+
+    Ok((table_name.to_string(), metadata_table_type))
 }
 
 pub fn deduce_table_format(table_properties: &HashMap<String, String>) -> Result<TableFormat> {
@@ -143,6 +157,29 @@ pub fn deduce_table_format(table_properties: &HashMap<String, String>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_table_reference() {
+        assert_eq!(
+            ("tbl".to_string(), None),
+            parse_table_reference("tbl").unwrap()
+        );
+        assert_eq!(
+            ("tbl".to_string(), Some(MetadataTableType::Snapshots)),
+            parse_table_reference("tbl$snapshots").unwrap()
+        );
+        assert_eq!(
+            ("tbl".to_string(), Some(MetadataTableType::Manifests)),
+            parse_table_reference("tbl$manifests").unwrap()
+        );
+        assert_eq!(
+            ("tbl".to_string(), Some(MetadataTableType::FilePath)),
+            parse_table_reference("tbl$file_path").unwrap()
+        );
+        assert!(parse_table_reference("tbl$unknown").is_err());
+        assert!(parse_table_reference("$snapshots").is_err());
+    }
+
     #[test]
     fn test_deduce_table_format() {
         let table_properties =

@@ -4,7 +4,7 @@ use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::table_provider_factory::{
-    TableProviderBuilder, deduce_table_format, split_table_name,
+    TableProviderBuilder, deduce_table_format, parse_table_reference,
 };
 use async_trait::async_trait;
 use aws_config::Region;
@@ -15,7 +15,6 @@ use datafusion::common::Result;
 use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use dobbydb_storage::storage::Storage;
-use iceberg::inspect::MetadataTableType;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -95,19 +94,13 @@ impl GlueSchema {
 #[async_trait]
 impl AsyncSchemaProvider for GlueSchema {
     async fn table(&self, tbl_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
-        let (table_name, metadata_table_name) = split_table_name(tbl_name);
-
-        if let Some(metadata_table_name) = metadata_table_name
-            && MetadataTableType::try_from(metadata_table_name).is_err()
-        {
-            return Ok(None);
-        }
+        let (table_name, metadata_table_type) = parse_table_reference(tbl_name)?;
 
         let glue_client = build_glue_client(&self.config).await;
         let resp = match glue_client
             .get_table()
             .database_name(&self.schema_name)
-            .name(table_name)
+            .name(table_name.as_str())
             .send()
             .await
         {
@@ -152,7 +145,7 @@ impl AsyncSchemaProvider for GlueSchema {
                 let paginator = glue_client
                     .get_partitions()
                     .database_name(&self.schema_name)
-                    .table_name(table_name)
+                    .table_name(table_name.as_str())
                     .into_paginator()
                     .send();
                 tokio::pin!(paginator);
@@ -184,7 +177,7 @@ impl AsyncSchemaProvider for GlueSchema {
             CatalogConfig::GLUE(self.config.deref().clone()),
         );
         let table_provider_builder = table_provider_builder
-            .with_table_metadata_table_name(metadata_table_name.map(|t| t.to_string()))
+            .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
             .with_hive_partitions(hive_partitions);
 

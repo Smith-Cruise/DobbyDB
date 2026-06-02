@@ -1,5 +1,6 @@
 use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
 use crate::table_format::iceberg::table_provider::IcebergTableProvider;
+use crate::table_format::metadata_table::MetadataTableType;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
@@ -25,7 +26,7 @@ impl IcebergTableProviderFactory {
     pub async fn try_create_table_provider(
         table_reference: TableReference,
         metadata_location: String,
-        metadata_table_name: Option<String>,
+        metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
     ) -> Result<Arc<dyn TableProvider>> {
         let schema_name: String;
@@ -61,9 +62,9 @@ impl IcebergTableProviderFactory {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?
                 .into_table();
 
-        if let Some(metadata_table_name) = &metadata_table_name {
+        if let Some(metadata_table_type) = metadata_table_type {
             let metadata_table_provider =
-                IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_name)?;
+                IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_type)?;
             Ok(Arc::new(metadata_table_provider))
         } else {
             let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table, storage)?;

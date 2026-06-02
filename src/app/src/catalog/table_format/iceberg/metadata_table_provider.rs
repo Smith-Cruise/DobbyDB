@@ -1,4 +1,5 @@
 use crate::table_format::iceberg::metadata_scan::IcebergMetadataScan;
+use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -11,7 +12,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
 use futures::stream::BoxStream;
 use iceberg::arrow::schema_to_arrow_schema;
-use iceberg::inspect::MetadataTableType;
+use iceberg::inspect::MetadataTableType as IcebergMetadataTableType;
 use iceberg::table::Table;
 use std::any::Any;
 use std::sync::Arc;
@@ -19,16 +20,23 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub(crate) struct IcebergMetadataTableProvider {
     table: Table,
-    r#type: MetadataTableType,
+    r#type: IcebergMetadataTableType,
 }
 
 impl IcebergMetadataTableProvider {
     pub fn try_new(
         table: Table,
-        metadata_table_name: &str,
+        metadata_table_type: MetadataTableType,
     ) -> Result<IcebergMetadataTableProvider> {
-        let metadata_table_type = MetadataTableType::try_from(metadata_table_name)
-            .map_err(DataFusionError::NotImplemented)?;
+        let metadata_table_type = match metadata_table_type {
+            MetadataTableType::Snapshots => IcebergMetadataTableType::Snapshots,
+            MetadataTableType::Manifests => IcebergMetadataTableType::Manifests,
+            MetadataTableType::FilePath => {
+                return Err(DataFusionError::NotImplemented(
+                    "iceberg metadata table file_path is not supported".to_string(),
+                ));
+            }
+        };
         Ok(IcebergMetadataTableProvider {
             table,
             r#type: metadata_table_type,
@@ -45,8 +53,8 @@ impl TableProvider for IcebergMetadataTableProvider {
     fn schema(&self) -> SchemaRef {
         let metadata_table = self.table.inspect();
         let schema = match self.r#type {
-            MetadataTableType::Snapshots => metadata_table.snapshots().schema(),
-            MetadataTableType::Manifests => metadata_table.manifests().schema(),
+            IcebergMetadataTableType::Snapshots => metadata_table.snapshots().schema(),
+            IcebergMetadataTableType::Manifests => metadata_table.manifests().schema(),
         };
         schema_to_arrow_schema(&schema).unwrap().into()
     }
@@ -70,8 +78,8 @@ impl IcebergMetadataTableProvider {
     pub async fn scan(self) -> Result<BoxStream<'static, Result<RecordBatch>>> {
         let metadata_table = self.table.inspect();
         let stream = match self.r#type {
-            MetadataTableType::Snapshots => metadata_table.snapshots().scan().await,
-            MetadataTableType::Manifests => metadata_table.manifests().scan().await,
+            IcebergMetadataTableType::Snapshots => metadata_table.snapshots().scan().await,
+            IcebergMetadataTableType::Manifests => metadata_table.manifests().scan().await,
         }
         .map_err(|e| DataFusionError::External(e.into()))?;
         let stream = stream.map_err(|e| DataFusionError::External(e.into()));
