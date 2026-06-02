@@ -155,7 +155,7 @@ fn object_meta_full_location(base_location: &str, file: &ObjectMeta) -> Result<S
 
 fn convert_object_meta_to_record_batch(
     schema: SchemaRef,
-    table_location: &String,
+    table_location: &str,
     files: Vec<ObjectMeta>,
 ) -> Result<RecordBatch> {
     let full_paths = files

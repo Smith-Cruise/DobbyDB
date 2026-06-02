@@ -102,7 +102,7 @@ mod tests {
         let path = location_to_object_store_path(
             "s3://warehouse/hive/tpch_hive.db/textfile_partition_table/p=1",
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(
             path.as_ref(),
             "hive/tpch_hive.db/textfile_partition_table/p=1"
