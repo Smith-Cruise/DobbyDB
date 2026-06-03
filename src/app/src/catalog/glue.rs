@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
+use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider, ShowCreateTable};
 use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
@@ -257,5 +257,53 @@ impl DobbyDbCatalogProvider for GlueCatalog {
             }
             Err(err) => Err(DataFusionError::External(Box::new(err))),
         }
+    }
+
+    async fn show_create_table(
+        &self,
+        table_name: &str,
+        schema_name: &str,
+    ) -> Result<ShowCreateTable> {
+        let glue_client = build_glue_client(&self.config).await;
+        let resp = glue_client
+            .get_table()
+            .database_name(schema_name)
+            .name(table_name)
+            .send()
+            .await
+            .map_err(|err| DataFusionError::External(Box::new(err)))?;
+        let glue_table = resp.table.ok_or_else(|| {
+            DataFusionError::Plan(format!("table {schema_name}.{table_name} not found"))
+        })?;
+        let table_properties = glue_table.parameters.clone().unwrap_or_default();
+        let table_format = deduce_table_format(&table_properties)?;
+        let hive_storage_info = if table_format == TableFormat::Hive {
+            Some(HiveStorageInfo::try_new_from_glue_table(&glue_table)?)
+        } else {
+            None
+        };
+        let partition_columns = hive_storage_info
+            .as_ref()
+            .map(|storage_info| {
+                storage_info
+                    .table_schema
+                    .table_partition_cols()
+                    .iter()
+                    .map(|field| field.name().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let location = hive_storage_info
+            .map(|storage_info| storage_info.table_location)
+            .unwrap_or_default();
+
+        ShowCreateTable::try_new(
+            self.config.name.as_str(),
+            schema_name,
+            table_name,
+            table_format,
+            partition_columns,
+            location,
+        )
     }
 }

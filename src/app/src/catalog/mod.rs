@@ -11,5 +11,5 @@ pub(crate) use internal::{
 };
 pub(crate) use manager::{
     CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
-    DobbyDbCatalogProviderList,
+    DobbyDbCatalogProviderList, ShowCreateTable,
 };

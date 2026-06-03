@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
+use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider, ShowCreateTable};
 use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
@@ -138,6 +138,65 @@ impl DobbyDbCatalogProvider for HMSCatalog {
                 err
             ))),
         }
+    }
+
+    async fn show_create_table(
+        &self,
+        table_name: &str,
+        schema_name: &str,
+    ) -> Result<ShowCreateTable> {
+        let hms_client = build_hms_client(&self.config)?;
+        let get_table_request = GetTableRequest {
+            db_name: schema_name.to_string().into(),
+            tbl_name: table_name.to_string().into(),
+            capabilities: None,
+        };
+        let hms_table = hms_client
+            .get_table_req(get_table_request)
+            .await
+            .map(from_thrift_exception)
+            .map_err(|e| DataFusionError::External(e.into()))??
+            .table;
+
+        let table_properties = hms_table
+            .parameters
+            .as_ref()
+            .map(|parameters| {
+                parameters
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let table_format = deduce_table_format(&table_properties)?;
+        let hive_storage_info = if table_format == TableFormat::Hive {
+            Some(HiveStorageInfo::try_new_from_hms_table(&hms_table)?)
+        } else {
+            None
+        };
+        let partition_columns = hive_storage_info
+            .as_ref()
+            .map(|storage_info| {
+                storage_info
+                    .table_schema
+                    .table_partition_cols()
+                    .iter()
+                    .map(|field| field.name().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let location = hive_storage_info
+            .map(|storage_info| storage_info.table_location)
+            .unwrap_or_default();
+
+        ShowCreateTable::try_new(
+            self.config.name.as_str(),
+            schema_name,
+            table_name,
+            table_format,
+            partition_columns,
+            location,
+        )
     }
 }
 

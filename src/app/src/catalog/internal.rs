@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
+use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider, ShowCreateTable};
 use crate::context::DobbyDbContext;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
@@ -66,6 +66,16 @@ impl DobbyDbCatalogProvider for InternalCatalog {
     async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool> {
         let table_names = self.list_table_names(schema_name).await?;
         Ok(table_names.iter().any(|name| name == table_name))
+    }
+
+    async fn show_create_table(
+        &self,
+        table_name: &str,
+        schema_name: &str,
+    ) -> Result<ShowCreateTable> {
+        Err(DataFusionError::NotImplemented(format!(
+            "SHOW CREATE TABLE is not implemented for internal table {schema_name}.{table_name}"
+        )))
     }
 }
 
