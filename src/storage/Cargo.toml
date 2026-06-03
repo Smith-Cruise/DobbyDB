@@ -10,3 +10,4 @@ url = { workspace = true }
 iceberg = { workspace = true }
 deltalake = { workspace = true }
 toml = { workspace = true }
+hdfs-native-object-store = { workspace = true }

@@ -7,6 +7,7 @@ use datafusion::object_store::ObjectStore;
 use deltalake::aws::constants::{
     AWS_ACCESS_KEY_ID, AWS_ENDPOINT_URL, AWS_REGION, AWS_SECRET_ACCESS_KEY,
 };
+use hdfs_native_object_store::HdfsObjectStoreBuilder;
 use iceberg::io::{
     OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, S3_ACCESS_KEY_ID, S3_ENDPOINT,
     S3_REGION, S3_SECRET_ACCESS_KEY,
@@ -19,6 +20,7 @@ use url::Url;
 pub const S3_SCHEMA: &str = "s3";
 pub const S3A_SCHEMA: &str = "s3a";
 pub const OSS_SCHEMA: &str = "oss";
+pub const HDFS_SCHEMA: &str = "hdfs";
 
 pub trait StorageTrait {
     fn build_object_store(
@@ -42,7 +44,7 @@ impl Storage {
         session: &dyn Session,
     ) -> Result<()> {
         let table_location = table_location.into();
-        let (path_schema, path_bucket) = parse_location_schema_bucket(&table_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_authority(&table_location)?;
 
         let object_store_path = Url::parse(&format!("{}://{}", path_schema, path_bucket))
             .map_err(|e| DataFusionError::External(e.into()))?;
@@ -68,6 +70,15 @@ impl Storage {
                         oss_storage.build_object_store(&path_bucket)?,
                     );
                 }
+            }
+            HDFS_SCHEMA => {
+                // HDFS has no configuration, so register the store directly
+                // from the NameNode authority (host:port) in the location.
+                let store = HdfsObjectStoreBuilder::new()
+                    .with_url(format!("{}://{}", HDFS_SCHEMA, path_bucket))
+                    .build()
+                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                registry.register_store(&object_store_path, Arc::new(store));
             }
             _ => {}
         }
@@ -137,20 +148,21 @@ impl Storage {
     }
 }
 
-pub fn parse_location_schema_bucket(path: &str) -> Result<(String, String)> {
+pub fn parse_location_schema_authority(path: &str) -> Result<(String, String)> {
     let parsed_url = Url::parse(path).map_err(|e| DataFusionError::External(e.into()))?;
     let url_schema = parsed_url.scheme();
-    let bucket = if let Some(host) = parsed_url.host_str() {
-        host
-    } else {
-        return Err(DataFusionError::Internal("failed to parse host".into()));
-    };
-    Ok((url_schema.to_string(), bucket.to_string()))
+    // Use the full authority (host:port) so HDFS NameNode ports are preserved.
+    // For s3/oss locations without a port, this is identical to the host.
+    let authority = parsed_url.authority();
+    if authority.is_empty() {
+        return Err(DataFusionError::Internal("failed to parse authority".into()));
+    }
+    Ok((url_schema.to_string(), authority.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{Storage, parse_location_schema_bucket};
+    use crate::storage::{Storage, parse_location_schema_authority};
 
     #[test]
     fn test_parse_storage() {
@@ -185,10 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_location_schema_bucket() {
+    fn test_parse_location_schema_authority() {
         let (schema, bucket) =
-            parse_location_schema_bucket("s3://bucket/tests/testdata/schema.json").unwrap();
+            parse_location_schema_authority("s3://bucket/tests/testdata/schema.json").unwrap();
         assert_eq!("s3", schema);
         assert_eq!("bucket", bucket);
+
+        let (schema, bucket) =
+            parse_location_schema_authority("hdfs://namenode:8020/user/hive/warehouse/db/t")
+                .unwrap();
+        assert_eq!("hdfs", schema);
+        assert_eq!("namenode:8020", bucket);
     }
 }

@@ -30,7 +30,7 @@ use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
-use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
+use dobbydb_storage::storage::{Storage, parse_location_schema_authority};
 use futures::StreamExt;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -87,7 +87,7 @@ impl TableProvider for HiveTableProvider {
         }
 
         let (path_schema, path_bucket) =
-            parse_location_schema_bucket(&self.hive_storage_info.table_location)?;
+            parse_location_schema_authority(&self.hive_storage_info.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
 
         let object_store = state.runtime_env().object_store(&store_url)?;

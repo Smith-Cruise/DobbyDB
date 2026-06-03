@@ -14,7 +14,7 @@ use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::object_store::ObjectMeta;
 use datafusion::physical_plan::ExecutionPlan;
-use dobbydb_storage::storage::{Storage, parse_location_schema_bucket};
+use dobbydb_storage::storage::{Storage, parse_location_schema_authority};
 use std::any::Any;
 use std::sync::Arc;
 use url::Url;
@@ -59,7 +59,7 @@ impl HiveMetadataTableProvider {
             storage.try_register_into_session(&self.table_location, state)?;
         }
 
-        let (path_schema, path_bucket) = parse_location_schema_bucket(&self.table_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_authority(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
         let object_store = state.runtime_env().object_store(&store_url)?;
 

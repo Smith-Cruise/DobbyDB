@@ -14,7 +14,7 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
-use dobbydb_storage::storage::parse_location_schema_bucket;
+use dobbydb_storage::storage::parse_location_schema_authority;
 use futures::StreamExt;
 use iceberg::spec::DataFileFormat;
 use iceberg::table::Table;
@@ -104,7 +104,7 @@ impl<'a> IcebergTableScanBuilder<'a> {
             }
         };
 
-        let (path_schema, path_bucket) = parse_location_schema_bucket(metadata_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_authority(metadata_location)?;
 
         let data_file_truncate = IcebergDataFilePathTruncate::try_new(metadata_location)?;
 
@@ -181,7 +181,7 @@ struct IcebergDataFilePathTruncate {
 
 impl IcebergDataFilePathTruncate {
     fn try_new(path: &str) -> Result<Self> {
-        let (path_schema, path_bucket) = parse_location_schema_bucket(path)?;
+        let (path_schema, path_bucket) = parse_location_schema_authority(path)?;
         Ok(IcebergDataFilePathTruncate {
             base_path: format!("{}://{}", path_schema, path_bucket),
         })
