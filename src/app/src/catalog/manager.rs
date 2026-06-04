@@ -2,7 +2,6 @@ use crate::context::DobbyDbContext;
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
 use crate::hms_catalog::{HMSCatalog, HMSCatalogConfig};
 use crate::internal_catalog::{INTERNAL_CATALOG, InternalCatalog};
-use crate::table_format::TableFormat;
 use async_trait::async_trait;
 use datafusion::catalog::{AsyncCatalogProvider, AsyncCatalogProviderList};
 use datafusion::common::Result;
@@ -24,89 +23,6 @@ pub enum CatalogConfig {
     Internal,
     HMS(HMSCatalogConfig),
     GLUE(GlueCatalogConfig),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShowCreateTable {
-    pub table_catalog: String,
-    pub table_schema: String,
-    pub table_name: String,
-    pub definition: String,
-}
-
-impl ShowCreateTable {
-    pub fn try_new(
-        table_catalog: impl Into<String>,
-        table_schema: impl Into<String>,
-        table_name: impl Into<String>,
-        table_format: TableFormat,
-        partition_columns: Vec<String>,
-        location: impl Into<String>,
-    ) -> Result<Self> {
-        let table_catalog = table_catalog.into();
-        let table_schema = table_schema.into();
-        let table_name = table_name.into();
-        let definition = build_show_create_table_definition(
-            &table_catalog,
-            &table_schema,
-            &table_name,
-            table_format,
-            &partition_columns,
-            &location.into(),
-        )?;
-
-        Ok(Self {
-            table_catalog,
-            table_schema,
-            table_name,
-            definition,
-        })
-    }
-}
-
-fn build_show_create_table_definition(
-    table_catalog: &str,
-    table_schema: &str,
-    table_name: &str,
-    table_format: TableFormat,
-    partition_columns: &[String],
-    location: &str,
-) -> Result<String> {
-    let using = match table_format {
-        TableFormat::Hive => "hive",
-        TableFormat::Iceberg => {
-            return Err(DataFusionError::NotImplemented(
-                "SHOW CREATE TABLE is not implemented for Iceberg tables".to_string(),
-            ));
-        }
-        TableFormat::Delta => {
-            return Err(DataFusionError::NotImplemented(
-                "SHOW CREATE TABLE is not implemented for Delta tables".to_string(),
-            ));
-        }
-    };
-
-    let mut definition = format!(
-        "CREATE TABLE `{}`.`{}`.`{}`\nUSING {}\n",
-        escape_backtick_identifier(table_catalog),
-        escape_backtick_identifier(table_schema),
-        escape_backtick_identifier(table_name),
-        using
-    );
-    if !partition_columns.is_empty() {
-        let partition_columns = partition_columns
-            .iter()
-            .map(|name| format!("`{}`", escape_backtick_identifier(name)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        definition.push_str(&format!("PARTITIONED BY ({partition_columns})\n"));
-    }
-    definition.push_str(&format!("LOCATION '{}'", location.replace('\'', "\\'")));
-    Ok(definition)
-}
-
-fn escape_backtick_identifier(value: &str) -> String {
-    value.replace('`', "``")
 }
 
 #[derive(Debug, Clone)]
@@ -233,17 +149,6 @@ impl CatalogManager {
             .table_exist(table_name, schema_name)
             .await
     }
-
-    pub async fn show_create_table(
-        &self,
-        catalog_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<ShowCreateTable> {
-        self.build_catalog_provider(catalog_name)?
-            .show_create_table(table_name, schema_name)
-            .await
-    }
 }
 
 pub struct DobbyDbCatalogProviderList {
@@ -294,81 +199,4 @@ pub trait DobbyDbCatalogProvider {
     async fn schema_exist(&self, schema_name: &str) -> Result<bool>;
 
     async fn table_exist(&self, table_name: &str, schema_name: &str) -> Result<bool>;
-
-    async fn show_create_table(
-        &self,
-        table_name: &str,
-        schema_name: &str,
-    ) -> Result<ShowCreateTable>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_hive_show_create_table_definition_with_partitions() -> Result<()> {
-        let definition = build_show_create_table_definition(
-            "catalog",
-            "schema",
-            "table",
-            TableFormat::Hive,
-            &["dt".to_string(), "region".to_string()],
-            "s3://bucket/path",
-        )?;
-
-        assert_eq!(
-            definition,
-            "CREATE TABLE `catalog`.`schema`.`table`\nUSING hive\nPARTITIONED BY (`dt`, `region`)\nLOCATION 's3://bucket/path'"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_build_hive_show_create_table_definition_without_partitions() -> Result<()> {
-        let definition = build_show_create_table_definition(
-            "catalog",
-            "schema",
-            "table",
-            TableFormat::Hive,
-            &[],
-            "s3://bucket/path",
-        )?;
-
-        assert_eq!(
-            definition,
-            "CREATE TABLE `catalog`.`schema`.`table`\nUSING hive\nLOCATION 's3://bucket/path'"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_build_show_create_table_definition_rejects_iceberg() {
-        let err = build_show_create_table_definition(
-            "catalog",
-            "schema",
-            "table",
-            TableFormat::Iceberg,
-            &[],
-            "s3://bucket/path",
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("Iceberg tables"));
-    }
-
-    #[test]
-    fn test_build_show_create_table_definition_rejects_delta() {
-        let err = build_show_create_table_definition(
-            "catalog",
-            "schema",
-            "table",
-            TableFormat::Delta,
-            &[],
-            "s3://bucket/path",
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("Delta tables"));
-    }
 }

@@ -1,14 +1,11 @@
 use crate::catalog::{
     CatalogManager, DobbyDbCatalogProviderList, INFORMATION_SCHEMA_SHOW_CATALOGS,
     INFORMATION_SCHEMA_SHOW_SCHEMAS, INFORMATION_SCHEMA_SHOW_TABLES,
-    INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG, ShowCreateTable,
+    INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
 };
 use crate::context::DobbyDbContext;
 use crate::parser::ExtendedParser;
 use crate::statements::{ExtendedStatement, ShowCatalogsStatement};
-use datafusion::arrow::array::StringArray;
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
-use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::AsyncCatalogProviderList;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
 use datafusion::common::Result;
@@ -18,8 +15,7 @@ use datafusion::error::DataFusionError;
 use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::sqlparser::ast::{
-    ObjectName, ObjectNamePart, ShowCreateObject, ShowStatementFilter, ShowStatementFilterPosition,
-    ShowStatementOptions, Statement, Use,
+    ShowStatementFilter, ShowStatementFilterPosition, ShowStatementOptions, Statement, Use,
 };
 use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
 use datafusion::prelude::{SessionConfig, SessionContext};
@@ -131,9 +127,6 @@ impl ExtendedSessionContext {
             ExtendedStatement::SQLStatement(stmt) => match stmt.as_ref() {
                 Statement::Use(use_stmt) => {
                     return self.handle_use_stmt(use_stmt).await;
-                }
-                Statement::ShowCreate { obj_type, obj_name } => {
-                    return self.handle_show_create_stmt(obj_type, obj_name).await;
                 }
                 Statement::ShowSchemas { show_options, .. } => {
                     self.build_show_schemas_sql(show_options)?
@@ -270,100 +263,6 @@ impl ExtendedSessionContext {
 
     fn escape_sql_string(value: &str) -> String {
         value.replace('\'', "''")
-    }
-
-    async fn handle_show_create_stmt(
-        &self,
-        obj_type: &ShowCreateObject,
-        obj_name: &ObjectName,
-    ) -> Result<DataFrame> {
-        if obj_type != &ShowCreateObject::Table {
-            return Err(DataFusionError::NotImplemented(format!(
-                "SHOW CREATE {obj_type} is not implemented"
-            )));
-        }
-
-        let (catalog_name, schema_name, table_name) =
-            self.resolve_show_create_table_name(obj_name)?;
-        if table_name.contains('$') {
-            return Err(DataFusionError::NotImplemented(
-                "SHOW CREATE TABLE is not implemented for metadata tables".to_string(),
-            ));
-        }
-
-        let show_create_table = self
-            .dobbydb_context
-            .catalog_manager
-            .show_create_table(&catalog_name, &schema_name, &table_name)
-            .await?;
-
-        self.build_show_create_table_dataframe(show_create_table)
-    }
-
-    fn build_show_create_table_dataframe(
-        &self,
-        show_create_table: ShowCreateTable,
-    ) -> Result<DataFrame> {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("table_catalog", DataType::Utf8, false),
-            Field::new("table_schema", DataType::Utf8, false),
-            Field::new("table_name", DataType::Utf8, false),
-            Field::new("definition", DataType::Utf8, false),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(StringArray::from(vec![show_create_table.table_catalog])),
-                Arc::new(StringArray::from(vec![show_create_table.table_schema])),
-                Arc::new(StringArray::from(vec![show_create_table.table_name])),
-                Arc::new(StringArray::from(vec![show_create_table.definition])),
-            ],
-        )
-        .map_err(|error| DataFusionError::External(Box::new(error)))?;
-
-        self.session_context.read_batch(batch)
-    }
-
-    fn resolve_show_create_table_name(
-        &self,
-        obj_name: &ObjectName,
-    ) -> Result<(String, String, String)> {
-        let parts = obj_name
-            .0
-            .iter()
-            .map(Self::object_name_part_value)
-            .collect::<Result<Vec<_>>>()?;
-        let state = self.session_context.state();
-        let catalog = &state.config().options().catalog;
-
-        match parts.as_slice() {
-            [table_name] => Ok((
-                catalog.default_catalog.clone(),
-                catalog.default_schema.clone(),
-                table_name.clone(),
-            )),
-            [schema_name, table_name] => Ok((
-                catalog.default_catalog.clone(),
-                schema_name.clone(),
-                table_name.clone(),
-            )),
-            [catalog_name, schema_name, table_name] => Ok((
-                catalog_name.clone(),
-                schema_name.clone(),
-                table_name.clone(),
-            )),
-            _ => Err(DataFusionError::Plan(format!(
-                "unsupported SHOW CREATE TABLE name: {obj_name}"
-            ))),
-        }
-    }
-
-    fn object_name_part_value(part: &ObjectNamePart) -> Result<String> {
-        part.as_ident()
-            .map(|ident| ident.value.clone())
-            .ok_or_else(|| {
-                DataFusionError::Plan(format!("unsupported SHOW CREATE TABLE name part: {part}"))
-            })
     }
 
     async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame> {
@@ -583,82 +482,6 @@ mod tests {
             .await?;
         let output = pretty_format_batches(&batches)?.to_string();
         assert_contains!(output.as_str(), "tables");
-        Ok(())
-    }
-
-    #[test]
-    fn test_resolve_show_create_table_name() -> Result<()> {
-        let session = ExtendedSessionContext::default();
-
-        let stmt = ExtendedParser::parse_sql("show create table tbl")?;
-        if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
-            && let Statement::ShowCreate { obj_name, .. } = stmt.as_ref()
-        {
-            assert_eq!(
-                session.resolve_show_create_table_name(obj_name)?,
-                (
-                    INTERNAL_CATALOG.to_string(),
-                    INFORMATION_SCHEMA.to_string(),
-                    "tbl".to_string()
-                )
-            );
-        } else {
-            panic!("expected SHOW CREATE TABLE statement");
-        }
-
-        let stmt = ExtendedParser::parse_sql("show create table db.tbl")?;
-        if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
-            && let Statement::ShowCreate { obj_name, .. } = stmt.as_ref()
-        {
-            assert_eq!(
-                session.resolve_show_create_table_name(obj_name)?,
-                (
-                    INTERNAL_CATALOG.to_string(),
-                    "db".to_string(),
-                    "tbl".to_string()
-                )
-            );
-        } else {
-            panic!("expected SHOW CREATE TABLE statement");
-        }
-
-        let stmt = ExtendedParser::parse_sql("show create table catalog.db.tbl")?;
-        if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
-            && let Statement::ShowCreate { obj_name, .. } = stmt.as_ref()
-        {
-            assert_eq!(
-                session.resolve_show_create_table_name(obj_name)?,
-                ("catalog".to_string(), "db".to_string(), "tbl".to_string())
-            );
-        } else {
-            panic!("expected SHOW CREATE TABLE statement");
-        }
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_show_create_table_dataframe_schema() -> Result<()> {
-        let session = ExtendedSessionContext::default();
-        let batches = session
-            .build_show_create_table_dataframe(ShowCreateTable {
-                table_catalog: "catalog".to_string(),
-                table_schema: "schema".to_string(),
-                table_name: "table".to_string(),
-                definition: "CREATE TABLE `catalog`.`schema`.`table`\nUSING hive\nLOCATION 's3://bucket/path'"
-                    .to_string(),
-            })?
-            .collect()
-            .await?;
-        let schema = batches[0].schema();
-        let output = pretty_format_batches(&batches)?.to_string();
-
-        assert_eq!(schema.fields().len(), 4);
-        assert_eq!(schema.field(0).name(), "table_catalog");
-        assert_eq!(schema.field(1).name(), "table_schema");
-        assert_eq!(schema.field(2).name(), "table_name");
-        assert_eq!(schema.field(3).name(), "definition");
-        assert_contains!(output.as_str(), "USING hive");
         Ok(())
     }
 
