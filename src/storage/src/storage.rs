@@ -155,7 +155,9 @@ pub fn parse_location_schema_authority(path: &str) -> Result<(String, String)> {
     // For s3/oss locations without a port, this is identical to the host.
     let authority = parsed_url.authority();
     if authority.is_empty() {
-        return Err(DataFusionError::Internal("failed to parse authority".into()));
+        return Err(DataFusionError::Internal(
+            "failed to parse authority".into(),
+        ));
     }
     Ok((url_schema.to_string(), authority.to_string()))
 }

@@ -3,6 +3,7 @@ pub(crate) mod glue;
 pub(crate) mod hms;
 pub(crate) mod internal;
 pub(crate) mod manager;
+pub(crate) mod table_definition_build;
 pub(crate) mod table_format;
 
 pub(crate) use internal::{
@@ -12,4 +13,8 @@ pub(crate) use internal::{
 pub(crate) use manager::{
     CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
     DobbyDbCatalogProviderList,
+};
+pub(crate) use table_definition_build::{
+    DELTA_UNSUPPORTED_TABLE_DEFINITION, ICEBERG_UNSUPPORTED_TABLE_DEFINITION,
+    TableDefinitionBuilder,
 };

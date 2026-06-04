@@ -23,6 +23,7 @@ pub struct TableProviderBuilder {
     metadata_table_type: Option<MetadataTableType>,
     hive_storage_info: Option<HiveStorageInfo>,
     hive_partitions: Option<Vec<HivePartition>>,
+    table_definition: Option<String>,
     storage: Option<Storage>,
 }
 
@@ -49,6 +50,7 @@ impl TableProviderBuilder {
             metadata_table_type: None,
             hive_storage_info: None,
             hive_partitions: None,
+            table_definition: None,
             storage,
         }
     }
@@ -68,6 +70,11 @@ impl TableProviderBuilder {
 
     pub fn with_hive_partitions(mut self, hive_partitions: Option<Vec<HivePartition>>) -> Self {
         self.hive_partitions = hive_partitions;
+        self
+    }
+
+    pub fn with_table_definition(mut self, table_definition: Option<String>) -> Self {
+        self.table_definition = table_definition;
         self
     }
 
@@ -112,6 +119,7 @@ impl TableProviderBuilder {
                         self.metadata_table_type,
                         self.storage,
                         io_handle,
+                        self.table_definition,
                     )
                 }
                 _ => Err(DataFusionError::Internal(

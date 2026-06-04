@@ -1,3 +1,4 @@
+use crate::catalog::DELTA_UNSUPPORTED_TABLE_DEFINITION;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::catalog::Session;
 use datafusion::common::Result;
@@ -95,6 +96,10 @@ impl TableProvider for DeltaTableProvider {
 
     fn table_type(&self) -> TableType {
         self.delta_scan.table_type()
+    }
+
+    fn get_table_definition(&self) -> Option<&str> {
+        Some(DELTA_UNSUPPORTED_TABLE_DEFINITION)
     }
 
     async fn scan(

@@ -1,0 +1,169 @@
+本次对话整理：DobbyDB SHOW CREATE TABLE 重新设计与实现
+
+背景
+- 用户最新一个 commit 实现了 Hive 下的 SHOW CREATE TABLE，Iceberg 和 Delta 暂时返回不支持。
+- 我先做了代码 review，指出初版问题：
+  - 输出不包含列定义，不像完整建表定义。
+  - 通过 HiveStorageInfo/Arrow schema 可能因为复杂 Hive 类型不支持而失败。
+  - Glue 表不存在错误处理不一致。
+  - LOCATION 字符串转义建议使用 SQL 标准单引号转义。
+- 用户询问为什么不使用 TableProvider::get_table_definition。
+  - 结论：该方法是 DataFusion TableProvider 的 optional hook，默认返回 None，不会自动生成 DDL。
+  - 适合作为 provider 层统一出口，但仍需要 DobbyDB 自己生成 definition。
+
+回滚
+- 用户要求把当前 show create table commit revert 掉并重新设计。
+- 我执行了：
+  - git revert --no-edit HEAD
+- 生成了一个新提交：
+  - Revert "tmp"
+- 当前分支 support-hdfs 比 origin/support-hdfs ahead 1。
+
+设计过程中的关键决定
+- 最初计划输出 Spark/DataFusion 简化风格：
+  - CREATE TABLE `catalog`.`schema`.`table`
+  - USING hive
+  - PARTITIONED BY (...)
+  - LOCATION '...'
+- 后续用户要求：
+  - 必须打印列定义。
+  - 新增 TableDefinitionBuilder 工具类。
+  - 文件位置：src/app/src/catalog/table_definition_build.rs
+  - Builder 提供 with_table_format、with_table_schema、with_table_location 等方法。
+  - Builder 可以从 schema 反推列定义，收拢逻辑。
+  - 不需要 Hive 风格类型名，只需要能表达列类型，和 DESC 里看到的类型一致。
+- 因此最终决定：
+  - TableDefinitionBuilder 从 DataFusion TableSchema 生成定义。
+  - 普通列来自 TableSchema::table_schema()，但需要过滤掉分区列，避免重复输出。
+  - 分区列来自 TableSchema::table_partition_cols()。
+  - 列类型直接使用 Arrow/DataFusion DataType 的 Display，例如 Int64、Utf8、Decimal128(10, 2)。
+  - 不做 Int64 -> bigint、Utf8 -> string 这种 Hive/Spark 类型映射。
+
+Iceberg/Delta 语义
+- 用户要求 Iceberg 和 Delta 直接在 get_table_definition 里返回 unsupported 信息。
+- 最终实现：
+  - IcebergTableProvider::get_table_definition() 返回：
+    unsupported: SHOW CREATE TABLE is not supported for Iceberg tables
+  - DeltaTableProvider::get_table_definition() 返回：
+    unsupported: SHOW CREATE TABLE is not supported for Delta tables
+
+session.rs 处理逻辑讨论
+- 用户问 resolve_table_references 是否能解析 SHOW CREATE TABLE 里的 table reference。
+  - 结论：DataFusion 53 的 resolve_table_references 能解析 ShowCreate Table/View 的 obj_name。
+  - 但它也会额外加入 information_schema 相关引用。
+- 一开始我设计为在 session.rs 提前拦截 Statement::ShowCreate 并调用 CatalogManager::show_create_table。
+- 用户后来要求改为：
+  - 在通用流程里先 resolve_table_references。
+  - 获取 resolved_catalog_providers。
+  - register_catalog_list。
+  - 在 match statement 里判断 ShowCreate。
+  - 从 resolved_catalog_providers 或 session_context 里获取指定 table 的 TableProvider。
+  - 从 TableProvider::get_table_definition() 获取 definition。
+- 最终用户进一步指出：
+  - handle_show_create_stmt 不用传 catalog_provider_list。
+  - 可以直接从 self.session_context 里面获取。
+- 最终 session.rs 逻辑：
+  - 不再在 create_dataframe 前半段提前 return ShowCreate。
+  - 先按通用路径：
+    - state.sql_to_statement(...)
+    - state.resolve_table_references(&statement)
+    - catalog_provider_list.resolve(...)
+    - self.session_context.register_catalog_list(...)
+  - 然后：
+    match &statement {
+        datafusion::sql::parser::Statement::Statement(stmt) => match stmt.as_ref() {
+            Statement::ShowCreate { obj_type, obj_name } => {
+                return self.handle_show_create_stmt(obj_type, obj_name).await;
+            }
+            _ => {
+                // do nothing
+            }
+        },
+        _ => {
+            // do nothing
+        }
+    }
+  - handle_show_create_stmt 内部：
+    - 检查 obj_type 必须是 Table。
+    - 解析 obj_name 为 catalog/schema/table。
+    - 拒绝 table_name 包含 '$' 的 metadata table。
+    - self.session_context.catalog(&catalog_name) 获取 CatalogProvider。
+    - catalog_provider.schema(&schema_name) 获取 SchemaProvider。
+    - schema_provider.table(&table_name).await? 获取 TableProvider。
+    - table_provider.get_table_definition() 获取 definition。
+    - 返回单列 definition 的 DataFrame。
+
+实现过的主要文件
+- 新增：
+  - src/app/src/catalog/table_definition_build.rs
+- 修改：
+  - src/app/src/catalog/mod.rs
+  - src/app/src/catalog/table_format/mod.rs
+  - src/app/src/catalog/table_format/table_provider_factory.rs
+  - src/app/src/catalog/table_format/hive.rs
+  - src/app/src/catalog/table_format/hive/hive_table_provider.rs
+  - src/app/src/catalog/table_format/iceberg/table_provider.rs
+  - src/app/src/catalog/table_format/delta/delta_table_provider.rs
+  - src/app/src/catalog/hms.rs
+  - src/app/src/catalog/glue.rs
+  - src/app/src/sql/session.rs
+  - src/storage/src/storage.rs
+
+关于 CatalogManager::show_create_table
+- 最初实现过 catalog 级 show_create_table 接口和 HMS/Glue/Internal 实现。
+- 用户要求从 TableProvider::get_table_definition 获取 definition 后，我移除了这套独立路径：
+  - 移除 ShowCreateTable 结果类型。
+  - 移除 CatalogManager::show_create_table。
+  - 移除 DobbyDbCatalogProvider::show_create_table。
+  - 移除 HMS/Glue/Internal 的 show_create_table 实现。
+- 现在只有 provider definition 路径。
+
+TableDefinitionBuilder 当前语义
+- 文件：src/app/src/catalog/table_definition_build.rs
+- 提供：
+  - TableDefinitionBuilder::new()
+  - with_table_format(TableFormat)
+  - with_table_schema(catalog, schema, table, TableSchema)
+  - with_table_location(location)
+  - build()
+- Hive 输出示例：
+  CREATE TABLE `catalog`.`schema`.`table`
+  (
+    `id` Int64,
+    `name` Utf8,
+    `amount` Decimal128(10, 2)
+  )
+  USING hive
+  PARTITIONED BY (`dt`)
+  LOCATION 's3://bucket/path'
+- 标识符用反引号转义。
+- location 用 SQL 标准单引号转义，即 ' 替换为 ''。
+- Iceberg/Delta build() 返回 unsupported 文本。
+
+Provider 集成
+- Hive:
+  - HiveTableProvider 增加 table_definition: Option<String>。
+  - HiveTableProvider::get_table_definition() 返回 self.table_definition.as_deref()。
+  - HiveTableProviderFactory::try_create_table_provider 增加 table_definition 参数。
+  - TableProviderBuilder 增加 table_definition 字段和 with_table_definition。
+  - HMS/Glue SchemaProvider::table 在构造 Hive provider 时通过 TableDefinitionBuilder 生成 definition 并传入。
+- Iceberg:
+  - IcebergTableProvider::get_table_definition() 返回 static unsupported 文本。
+- Delta:
+  - DeltaTableProvider::get_table_definition() 返回 static unsupported 文本。
+
+测试与验证
+- 运行并通过：
+  - cargo fmt --all -- --check
+  - cargo test -p dobbydb-app show_create -- --nocapture
+  - cargo test -p dobbydb-app table_definition -- --nocapture
+  - cargo test -p dobbydb-app hive_provider_returns_table_definition -- --nocapture
+  - cargo test -p dobbydb-app
+  - cargo clippy --all-targets --all-features -- -D warnings
+  - git diff --check
+
+注意事项
+- src/storage/src/storage.rs 有一处 rustfmt 必需的纯格式化改动：
+  - DataFusionError::Internal("failed to parse authority".into()) 被 rustfmt 拆成多行。
+- 当前工作区还有未提交改动。
+- 当前分支仍然包含前面生成的 Revert "tmp" 提交，并且相对 origin/support-hdfs ahead 1。
