@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider, TableDefinitionBuilder};
+use crate::catalog::{CatalogConfig, DobbyDbCatalogProvider};
 use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::hive::hive_partition::HivePartition;
@@ -135,54 +135,39 @@ impl AsyncSchemaProvider for GlueSchema {
         };
 
         let table_format = deduce_table_format(&glue_table_properties)?;
-        let (hive_storage_info, hive_partitions, table_definition) =
-            if table_format == TableFormat::Hive {
-                let hive_storage_info = HiveStorageInfo::try_new_from_glue_table(&glue_table)?;
-                let table_definition = TableDefinitionBuilder::new()
-                    .with_table_format(table_format)
-                    .with_table_schema(
-                        self.config.name.as_str(),
-                        self.schema_name.as_str(),
-                        table_name.as_str(),
-                        hive_storage_info.table_schema.clone(),
-                    )
-                    .with_table_location(hive_storage_info.table_location.clone())
-                    .build()?;
-                let hive_partitions = if !hive_storage_info
-                    .table_schema
-                    .table_partition_cols()
-                    .is_empty()
-                {
-                    let paginator = glue_client
-                        .get_partitions()
-                        .database_name(&self.schema_name)
-                        .table_name(table_name.as_str())
-                        .into_paginator()
-                        .send();
-                    tokio::pin!(paginator);
+        let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
+            let hive_storage_info = HiveStorageInfo::try_new_from_glue_table(&glue_table)?;
+            let hive_partitions = if !hive_storage_info
+                .table_schema
+                .table_partition_cols()
+                .is_empty()
+            {
+                let paginator = glue_client
+                    .get_partitions()
+                    .database_name(&self.schema_name)
+                    .table_name(table_name.as_str())
+                    .into_paginator()
+                    .send();
+                tokio::pin!(paginator);
 
-                    let mut partitions = Vec::new();
-                    while let Some(page) = paginator.next().await {
-                        let page = page.map_err(|e| DataFusionError::External(Box::new(e)))?;
-                        partitions.extend(
-                            page.partitions()
-                                .iter()
-                                .map(HivePartition::try_new_from_glue_partition)
-                                .collect::<Result<Vec<_>>>()?,
-                        );
-                    }
-                    partitions
-                } else {
-                    vec![]
-                };
-                (
-                    Some(hive_storage_info),
-                    Some(hive_partitions),
-                    Some(table_definition),
-                )
+                let mut partitions = Vec::new();
+                while let Some(page) = paginator.next().await {
+                    let page = page.map_err(|e| DataFusionError::External(Box::new(e)))?;
+                    partitions.extend(
+                        page.partitions()
+                            .iter()
+                            .map(HivePartition::try_new_from_glue_partition)
+                            .collect::<Result<Vec<_>>>()?,
+                    );
+                }
+                partitions
             } else {
-                (None, None, None)
+                vec![]
             };
+            (Some(hive_storage_info), Some(hive_partitions))
+        } else {
+            (None, None)
+        };
 
         let table_provider_builder = TableProviderBuilder::new(
             self.dobbydb_context.clone(),
@@ -194,8 +179,7 @@ impl AsyncSchemaProvider for GlueSchema {
         let table_provider_builder = table_provider_builder
             .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
-            .with_hive_partitions(hive_partitions)
-            .with_table_definition(table_definition);
+            .with_hive_partitions(hive_partitions);
 
         Ok(Some(table_provider_builder.build().await?))
     }

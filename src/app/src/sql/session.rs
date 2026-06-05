@@ -11,7 +11,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::AsyncCatalogProviderList;
 use datafusion::catalog::information_schema::INFORMATION_SCHEMA;
-use datafusion::common::Result;
+use datafusion::common::{Result, TableReference};
 use datafusion::config::ConfigOptions;
 use datafusion::dataframe::DataFrame;
 use datafusion::error::DataFusionError;
@@ -23,6 +23,7 @@ use datafusion::logical_expr::sqlparser::ast::{
 };
 use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
 use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::sql::parser::Statement as DataFusionStatement;
 use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -151,7 +152,18 @@ impl ExtendedSessionContext {
         // Find all `TableReferences` in the parsed queries. These correspond to the
         // tables referred to by the query (in this case
         // `remote_schema.remote_table`)
-        let references = state.resolve_table_references(&statement)?;
+
+        // DataFusion resolves SHOW CREATE through information_schema internally,
+        // which adds synthetic references such as information_schema.columns.
+        // Remote catalogs should only resolve the target table here; otherwise
+        // HMS/Glue would try to load those synthetic information_schema tables.
+        let references = match Self::show_create_statement(&statement) {
+            Some((obj_type, obj_name)) => {
+                self.resolve_show_create_table_references(obj_type, obj_name)?
+            }
+            None => state.resolve_table_references(&statement)?,
+        };
+
         // Now we can asynchronously resolve the table references to get a cached catalog
         // that we can use for our query
         let catalog_provider_list = DobbyDbCatalogProviderList::new(self.dobbydb_context.clone());
@@ -160,18 +172,8 @@ impl ExtendedSessionContext {
             .await?;
         self.session_context
             .register_catalog_list(resolved_catalog_providers);
-        match &statement {
-            datafusion::sql::parser::Statement::Statement(stmt) => match stmt.as_ref() {
-                Statement::ShowCreate { obj_type, obj_name } => {
-                    return self.handle_show_create_stmt(obj_type, obj_name).await;
-                }
-                _ => {
-                    // do nothing
-                }
-            },
-            _ => {
-                // do nothing
-            }
+        if let Some((obj_type, obj_name)) = Self::show_create_statement(&statement) {
+            return self.handle_show_create_stmt(obj_type, obj_name).await;
         }
         self.session_context.sql(&sql_string).await
     }
@@ -280,6 +282,44 @@ impl ExtendedSessionContext {
 
     fn escape_sql_string(value: &str) -> String {
         value.replace('\'', "''")
+    }
+
+    fn show_create_statement(
+        statement: &DataFusionStatement,
+    ) -> Option<(&ShowCreateObject, &ObjectName)> {
+        match statement {
+            DataFusionStatement::Statement(stmt) => match stmt.as_ref() {
+                Statement::ShowCreate { obj_type, obj_name } => Some((obj_type, obj_name)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn resolve_show_create_table_references(
+        &self,
+        obj_type: &ShowCreateObject,
+        obj_name: &ObjectName,
+    ) -> Result<Vec<TableReference>> {
+        if obj_type != &ShowCreateObject::Table {
+            return Err(DataFusionError::NotImplemented(format!(
+                "SHOW CREATE {obj_type} is not implemented"
+            )));
+        }
+
+        let (catalog_name, schema_name, table_name) =
+            self.resolve_show_create_table_name(obj_name)?;
+        if table_name.contains('$') {
+            return Err(DataFusionError::NotImplemented(
+                "SHOW CREATE TABLE is not implemented for metadata tables".to_string(),
+            ));
+        }
+
+        Ok(vec![TableReference::full(
+            catalog_name,
+            schema_name,
+            table_name,
+        )])
     }
 
     async fn handle_show_create_stmt(
@@ -642,6 +682,46 @@ mod tests {
                 session.resolve_show_create_table_name(obj_name)?,
                 ("catalog".to_string(), "db".to_string(), "tbl".to_string())
             );
+        } else {
+            panic!("expected SHOW CREATE TABLE statement");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_show_create_table_references_only_target_table() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let stmt = ExtendedParser::parse_sql("show create table tbl")?;
+        if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
+            && let Statement::ShowCreate { obj_name, obj_type } = stmt.as_ref()
+        {
+            assert_eq!(
+                session.resolve_show_create_table_references(obj_type, obj_name)?,
+                vec![TableReference::full(
+                    INTERNAL_CATALOG,
+                    INFORMATION_SCHEMA,
+                    "tbl"
+                )]
+            );
+        } else {
+            panic!("expected SHOW CREATE TABLE statement");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_show_create_table_references_rejects_metadata_table() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let stmt = ExtendedParser::parse_sql("show create table \"tbl$file_path\"")?;
+        if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
+            && let Statement::ShowCreate { obj_name, obj_type } = stmt.as_ref()
+        {
+            let err = session
+                .resolve_show_create_table_references(obj_type, obj_name)
+                .unwrap_err();
+            assert_contains!(err.to_string(), "metadata tables");
         } else {
             panic!("expected SHOW CREATE TABLE statement");
         }

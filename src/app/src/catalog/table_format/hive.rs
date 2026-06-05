@@ -25,7 +25,7 @@ impl HiveTableProviderFactory {
         metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
         io_handle: Handle,
-        table_definition: Option<String>,
+        table_definition: String,
     ) -> Result<Arc<dyn TableProvider>> {
         match metadata_table_type {
             Some(metadata_table_type) => {
@@ -72,7 +72,7 @@ mod tests {
             None,
             None,
             Handle::current(),
-            Some("CREATE TABLE t".to_string()),
+            "CREATE TABLE t".to_string(),
         )?;
 
         assert_eq!(provider.get_table_definition(), Some("CREATE TABLE t"));

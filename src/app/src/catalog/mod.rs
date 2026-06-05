@@ -14,7 +14,4 @@ pub(crate) use manager::{
     CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
     DobbyDbCatalogProviderList,
 };
-pub(crate) use table_definition_build::{
-    DELTA_UNSUPPORTED_TABLE_DEFINITION, ICEBERG_UNSUPPORTED_TABLE_DEFINITION,
-    TableDefinitionBuilder,
-};
+pub(crate) use table_definition_build::TableDefinitionBuilder;

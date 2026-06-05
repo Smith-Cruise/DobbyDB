@@ -1,4 +1,3 @@
-use crate::catalog::ICEBERG_UNSUPPORTED_TABLE_DEFINITION;
 use crate::table_format::iceberg::table_scan::IcebergTableScanBuilder;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::Schema;
@@ -53,7 +52,7 @@ impl TableProvider for IcebergTableProvider {
     }
 
     fn get_table_definition(&self) -> Option<&str> {
-        Some(ICEBERG_UNSUPPORTED_TABLE_DEFINITION)
+        None
     }
 
     async fn scan(

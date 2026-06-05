@@ -43,7 +43,7 @@ pub struct HiveTableProvider {
     partitions: Vec<HivePartition>,
     storage: Option<Storage>,
     io_handle: Handle,
-    table_definition: Option<String>,
+    table_definition: String,
 }
 
 impl HiveTableProvider {
@@ -52,7 +52,7 @@ impl HiveTableProvider {
         partitions: Vec<HivePartition>,
         storage: Option<Storage>,
         io_handle: Handle,
-        table_definition: Option<String>,
+        table_definition: String,
     ) -> Self {
         Self {
             hive_storage_info,
@@ -79,7 +79,7 @@ impl TableProvider for HiveTableProvider {
     }
 
     fn get_table_definition(&self) -> Option<&str> {
-        self.table_definition.as_deref()
+        Some(&self.table_definition)
     }
 
     async fn scan(
