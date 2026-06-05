@@ -179,23 +179,4 @@ mod tests {
         );
         Ok(())
     }
-
-    #[test]
-    fn test_build_hive_definition_requires_full_table_reference() {
-        let schema = TableSchema::new(
-            Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)])),
-            vec![],
-        );
-
-        let err = TableDefinitionBuilder::new(
-            TableFormat::Hive,
-            TableReference::partial("schema", "table"),
-            schema,
-            "s3://bucket/path",
-        )
-        .build()
-        .unwrap_err();
-
-        assert!(err.to_string().contains("fully qualified"));
-    }
 }

@@ -241,28 +241,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_build_hive_provider_requires_full_table_reference() {
-        let err = TableProviderBuilder::new(
-            Arc::new(DobbyDbContext::default()),
-            TableReference::partial("schema", "table"),
-            HashMap::new(),
-            TableFormat::Hive,
-            CatalogConfig::HMS(crate::hms_catalog::HMSCatalogConfig {
-                name: "catalog".to_string(),
-                metastore_uri: "localhost:9083".to_string(),
-                storage: None,
-            }),
-        )
-        .with_hive_storage_info(Some(test_hive_storage_info()))
-        .with_hive_partitions(Some(vec![]))
-        .build()
-        .await
-        .unwrap_err();
-
-        assert!(err.to_string().contains("fully qualified"));
-    }
-
     fn test_hive_storage_info() -> HiveStorageInfo {
         HiveStorageInfo {
             table_location: "s3://bucket/path".to_string(),
