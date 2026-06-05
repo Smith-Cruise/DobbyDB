@@ -14,7 +14,9 @@ use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::object_store::ObjectMeta;
 use datafusion::physical_plan::ExecutionPlan;
-use dobbydb_storage::storage::{Storage, parse_location_schema_authority};
+use dobbydb_storage::storage::{
+    Storage, parse_location_schema_authority, try_register_storage_info_session,
+};
 use std::any::Any;
 use std::sync::Arc;
 use url::Url;
@@ -55,9 +57,7 @@ impl HiveMetadataTableProvider {
     }
 
     async fn retrieve_table_data_file_path(&self, state: &dyn Session) -> Result<Vec<ObjectMeta>> {
-        if let Some(storage) = &self.storage {
-            storage.try_register_into_session(&self.table_location, state)?;
-        }
+        try_register_storage_info_session(self.storage.as_ref(), &self.table_location, state)?;
 
         let (path_schema, path_bucket) = parse_location_schema_authority(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
@@ -139,16 +139,16 @@ fn file_path_schema() -> SchemaRef {
     ]))
 }
 
-fn object_meta_full_location(base_location: &str, file: &ObjectMeta) -> Result<String> {
-    let parsed = Url::parse(base_location).map_err(|e| DataFusionError::External(e.into()))?;
-    let bucket_location = match parsed.host_str() {
-        Some(host) => format!("{}://{}", parsed.scheme(), host),
-        None => format!("{}://", parsed.scheme()),
+fn object_meta_full_location(table_location: &str, file: &ObjectMeta) -> Result<String> {
+    let parsed = Url::parse(table_location).map_err(|e| DataFusionError::External(e.into()))?;
+    let authority = match parsed.authority() {
+        "" => format!("{}://", parsed.scheme()),
+        authority => format!("{}://{}", parsed.scheme(), authority),
     };
 
     Ok(format!(
         "{}/{}",
-        bucket_location.trim_end_matches('/'),
+        authority.trim_end_matches('/'),
         file.location.as_ref().trim_start_matches('/')
     ))
 }
@@ -274,6 +274,22 @@ mod tests {
         assert_eq!(batches[0].num_columns(), 1);
         assert_eq!(batches[0].schema().field(0).name(), "file_size");
         assert!(!batches[0].column(0).is_null(0));
+    }
+
+    // mainly test about host:port
+    #[tokio::test]
+    async fn test_object_meta_full_location_preserves_hdfs_authority_port() {
+        let store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        put_test_object(&store, "hive/table/file1.parquet", b"123").await;
+        let file = store
+            .head(&Path::from("hive/table/file1.parquet"))
+            .await
+            .unwrap();
+
+        let full_path =
+            object_meta_full_location("hdfs://namenode:8020/hive/table", &file).unwrap();
+
+        assert_eq!(full_path, "hdfs://namenode:8020/hive/table/file1.parquet");
     }
 
     fn session_context_with_store() -> SessionContext {

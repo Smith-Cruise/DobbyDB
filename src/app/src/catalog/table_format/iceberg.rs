@@ -29,21 +29,16 @@ impl IcebergTableProviderFactory {
         metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
     ) -> Result<Arc<dyn TableProvider>> {
-        let schema_name: String;
-        let table_name: String;
-        match table_reference {
+        let (schema_name, table_name) = match table_reference {
             TableReference::Full {
                 catalog: _,
                 schema,
                 table,
-            } => {
-                schema_name = schema.to_string();
-                table_name = table.to_string();
-            }
+            } => (schema.to_string(), table.to_string()),
             _ => {
                 return Err(DataFusionError::Plan("invalid table reference".to_string()));
             }
-        }
+        };
         let file_io_properties = if let Some(storage) = &storage {
             storage.build_iceberg_file_io_properties()
         } else {

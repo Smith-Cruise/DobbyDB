@@ -38,53 +38,6 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn try_register_into_session(
-        &self,
-        table_location: impl Into<String>,
-        session: &dyn Session,
-    ) -> Result<()> {
-        let table_location = table_location.into();
-        let (path_schema, path_bucket) = parse_location_schema_authority(&table_location)?;
-
-        let object_store_path = Url::parse(&format!("{}://{}", path_schema, path_bucket))
-            .map_err(|e| DataFusionError::External(e.into()))?;
-
-        let registry = &session.runtime_env().object_store_registry;
-        if registry.get_store(&object_store_path).is_ok() {
-            return Ok(());
-        }
-
-        match path_schema.as_str() {
-            S3_SCHEMA | S3A_SCHEMA => {
-                if let Some(s3_storage) = &self.s3_storage {
-                    registry.register_store(
-                        &object_store_path,
-                        s3_storage.build_object_store(&path_bucket)?,
-                    );
-                }
-            }
-            OSS_SCHEMA => {
-                if let Some(oss_storage) = &self.oss_storage {
-                    registry.register_store(
-                        &object_store_path,
-                        oss_storage.build_object_store(&path_bucket)?,
-                    );
-                }
-            }
-            HDFS_SCHEMA => {
-                // HDFS has no configuration, so register the store directly
-                // from the NameNode authority (host:port) in the location.
-                let store = HdfsObjectStoreBuilder::new()
-                    .with_url(format!("{}://{}", HDFS_SCHEMA, path_bucket))
-                    .build()
-                    .map_err(|e| DataFusionError::External(Box::new(e)))?;
-                registry.register_store(&object_store_path, Arc::new(store));
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
     pub fn build_iceberg_file_io_properties(&self) -> HashMap<String, String> {
         let mut map: HashMap<String, String> = HashMap::new();
         if let Some(s3_storage) = &self.s3_storage {
@@ -148,6 +101,53 @@ impl Storage {
     }
 }
 
+pub fn try_register_storage_info_session(
+    storage: Option<&Storage>,
+    table_location: impl Into<String>,
+    session: &dyn Session,
+) -> Result<()> {
+    let table_location = table_location.into();
+    let (path_schema, path_bucket) = parse_location_schema_authority(&table_location)?;
+
+    let object_store_path = Url::parse(&format!("{}://{}", path_schema, path_bucket))
+        .map_err(|e| DataFusionError::External(e.into()))?;
+
+    let registry = &session.runtime_env().object_store_registry;
+    if registry.get_store(&object_store_path).is_ok() {
+        return Ok(());
+    }
+
+    match path_schema.as_str() {
+        S3_SCHEMA | S3A_SCHEMA => {
+            if let Some(s3_storage) = storage.and_then(|storage| storage.s3_storage.as_ref()) {
+                registry.register_store(
+                    &object_store_path,
+                    s3_storage.build_object_store(&path_bucket)?,
+                );
+            }
+        }
+        OSS_SCHEMA => {
+            if let Some(oss_storage) = storage.and_then(|storage| storage.oss_storage.as_ref()) {
+                registry.register_store(
+                    &object_store_path,
+                    oss_storage.build_object_store(&path_bucket)?,
+                );
+            }
+        }
+        HDFS_SCHEMA => {
+            // HDFS has no configuration, so register the store directly
+            // from the NameNode authority (host:port) in the location.
+            let store = HdfsObjectStoreBuilder::new()
+                .with_url(format!("{}://{}", HDFS_SCHEMA, path_bucket))
+                .build()
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            registry.register_store(&object_store_path, Arc::new(store));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub fn parse_location_schema_authority(path: &str) -> Result<(String, String)> {
     let parsed_url = Url::parse(path).map_err(|e| DataFusionError::External(e.into()))?;
     let url_schema = parsed_url.scheme();
@@ -164,7 +164,11 @@ pub fn parse_location_schema_authority(path: &str) -> Result<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::{Storage, parse_location_schema_authority};
+    use crate::storage::{
+        Storage, parse_location_schema_authority, try_register_storage_info_session,
+    };
+    use datafusion::execution::object_store::ObjectStoreUrl;
+    use datafusion::prelude::SessionContext;
 
     #[test]
     fn test_parse_storage() {
@@ -210,5 +214,23 @@ mod tests {
                 .unwrap();
         assert_eq!("hdfs", schema);
         assert_eq!("namenode:8020", bucket);
+    }
+
+    #[test]
+    fn test_register_hdfs_without_storage_config() {
+        let ctx = SessionContext::new();
+
+        try_register_storage_info_session(
+            None,
+            "hdfs://namenode:8020/user/hive/warehouse/db/t",
+            &ctx.state(),
+        )
+        .unwrap();
+
+        assert!(
+            ctx.runtime_env()
+                .object_store(ObjectStoreUrl::parse("hdfs://namenode:8020").unwrap())
+                .is_ok()
+        );
     }
 }

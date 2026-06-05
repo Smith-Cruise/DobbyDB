@@ -8,7 +8,7 @@ use datafusion::datasource::TableType;
 use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use dobbydb_storage::storage::Storage;
+use dobbydb_storage::storage::{Storage, try_register_storage_info_session};
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::table::Table;
 use std::any::Any;
@@ -75,9 +75,7 @@ impl TableProvider for IcebergTableProvider {
                 "metadata location not found.".into(),
             ))?
         };
-        if let Some(storage) = &self.storage {
-            storage.try_register_into_session(metadata_location, state)?;
-        }
+        try_register_storage_info_session(self.storage.as_ref(), metadata_location, state)?;
         builder = builder
             .with_snapshot_id(self.snapshot_id)
             .with_projection(projection)
