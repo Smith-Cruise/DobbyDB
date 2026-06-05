@@ -10,7 +10,7 @@ use deltalake::aws::constants::{
 use hdfs_native_object_store::HdfsObjectStoreBuilder;
 use iceberg::io::{
     OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, S3_ACCESS_KEY_ID, S3_ENDPOINT,
-    S3_REGION, S3_SECRET_ACCESS_KEY,
+    S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -53,6 +53,10 @@ impl Storage {
             if let Some(secret_key) = &s3_storage.secret_key {
                 map.insert(S3_SECRET_ACCESS_KEY.into(), secret_key.clone());
             }
+            map.insert(
+                S3_PATH_STYLE_ACCESS.into(),
+                s3_storage.path_style_access.to_string(),
+            );
         }
 
         if let Some(oss_storage) = &self.oss_storage {
@@ -169,6 +173,7 @@ mod tests {
     };
     use datafusion::execution::object_store::ObjectStoreUrl;
     use datafusion::prelude::SessionContext;
+    use iceberg::io::S3_PATH_STYLE_ACCESS;
 
     #[test]
     fn test_parse_storage() {
@@ -200,6 +205,33 @@ mod tests {
         assert_eq!("admin", &oss_storage.access_key.unwrap());
         assert_eq!("password", &oss_storage.secret_key.unwrap());
         assert!(!oss_storage.path_style_access);
+    }
+
+    #[test]
+    fn test_build_iceberg_file_io_properties_includes_s3_path_style_access() {
+        let text = r#"
+            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
+        "#;
+
+        let storage: Storage = toml::from_str(text).unwrap();
+        let properties = storage.build_iceberg_file_io_properties();
+
+        assert_eq!(
+            properties.get(S3_PATH_STYLE_ACCESS).map(String::as_str),
+            Some("true")
+        );
+
+        let text = r#"
+            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password" }
+        "#;
+
+        let storage: Storage = toml::from_str(text).unwrap();
+        let properties = storage.build_iceberg_file_io_properties();
+
+        assert_eq!(
+            properties.get(S3_PATH_STYLE_ACCESS).map(String::as_str),
+            Some("false")
+        );
     }
 
     #[test]
