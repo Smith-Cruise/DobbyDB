@@ -25,6 +25,7 @@ impl HiveTableProviderFactory {
         metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
         io_handle: Handle,
+        table_definition: String,
     ) -> Result<Arc<dyn TableProvider>> {
         match metadata_table_type {
             Some(metadata_table_type) => {
@@ -37,7 +38,8 @@ impl HiveTableProviderFactory {
                 Ok(Arc::new(provider))
             }
             None => {
-                let provider = HiveTableProvider::new(info, partitions, storage, io_handle);
+                let provider =
+                    HiveTableProvider::new(info, partitions, storage, io_handle, table_definition);
                 Ok(Arc::new(provider))
             }
         }

@@ -1,4 +1,4 @@
-use crate::catalog::CatalogConfig;
+use crate::catalog::{CatalogConfig, TableDefinitionBuilder};
 use crate::context::DobbyDbContext;
 use crate::table_format::TableFormat;
 use crate::table_format::delta::DeltaTableProviderFactory;
@@ -106,12 +106,20 @@ impl TableProviderBuilder {
             TableFormat::Hive => match (self.hive_storage_info, self.hive_partitions) {
                 (Some(storage_info), Some(partitions)) => {
                     let io_handle = self.dobbydb_context.runtime_manager.io_handle();
+                    let table_definition = TableDefinitionBuilder::new(
+                        TableFormat::Hive,
+                        self.table_reference.clone(),
+                        storage_info.table_schema.clone(),
+                        storage_info.table_location.clone(),
+                    )
+                    .build()?;
                     HiveTableProviderFactory::try_create_table_provider(
                         storage_info,
                         partitions,
                         self.metadata_table_type,
                         self.storage,
                         io_handle,
+                        table_definition,
                     )
                 }
                 _ => Err(DataFusionError::Internal(
@@ -157,6 +165,9 @@ pub fn deduce_table_format(table_properties: &HashMap<String, String>) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::table_format::hive::hive_storage_info::HiveInputFormat;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::datasource::table_schema::TableSchema;
 
     #[test]
     fn test_parse_table_reference() {
@@ -201,5 +212,45 @@ mod tests {
             TableFormat::Hive,
             deduce_table_format(&table_properties).unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn test_build_hive_provider_generates_table_definition() -> Result<()> {
+        let provider = TableProviderBuilder::new(
+            Arc::new(DobbyDbContext::default()),
+            TableReference::full("catalog", "schema", "table"),
+            HashMap::new(),
+            TableFormat::Hive,
+            CatalogConfig::HMS(crate::hms_catalog::HMSCatalogConfig {
+                name: "catalog".to_string(),
+                metastore_uri: "localhost:9083".to_string(),
+                storage: None,
+            }),
+        )
+        .with_hive_storage_info(Some(test_hive_storage_info()))
+        .with_hive_partitions(Some(vec![]))
+        .build()
+        .await?;
+
+        assert_eq!(
+            provider.get_table_definition(),
+            Some(
+                "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64\n)\nUSING hive\nLOCATION 's3://bucket/path'"
+            )
+        );
+        Ok(())
+    }
+
+    fn test_hive_storage_info() -> HiveStorageInfo {
+        HiveStorageInfo {
+            table_location: "s3://bucket/path".to_string(),
+            input_format: HiveInputFormat::Parquet,
+            table_schema: TableSchema::new(
+                Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)])),
+                vec![],
+            ),
+            serde_properties: HashMap::new(),
+            table_properties: HashMap::new(),
+        }
     }
 }
