@@ -109,8 +109,16 @@ impl TableProviderBuilder {
                     let table_definition = TableDefinitionBuilder::new(
                         TableFormat::Hive,
                         self.table_reference.clone(),
-                        storage_info.table_schema.clone(),
+                        storage_info.table_schema.table_schema().as_ref().clone(),
                         storage_info.table_location.clone(),
+                    )
+                    .with_partition_column_names(
+                        storage_info
+                            .table_schema
+                            .table_partition_cols()
+                            .iter()
+                            .map(|field| field.name().to_string())
+                            .collect(),
                     )
                     .build()?;
                     HiveTableProviderFactory::try_create_table_provider(
@@ -235,7 +243,7 @@ mod tests {
         assert_eq!(
             provider.get_table_definition(),
             Some(
-                "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64\n)\nUSING hive\nLOCATION 's3://bucket/path'"
+                "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64\n)\nUSING HIVE\nLOCATION 's3://bucket/path'"
             )
         );
         Ok(())
