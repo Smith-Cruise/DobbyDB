@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(
             provider.get_table_definition(),
             Some(
-                "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64\n)\nUSING hive\nLOCATION 's3://bucket/path'"
+                "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64\n)\nUSING HIVE\nLOCATION 's3://bucket/path'"
             )
         );
         Ok(())
