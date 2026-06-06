@@ -22,6 +22,7 @@ futures = "0.3.31"
 async-trait = "0.1.88"
 url = "2.5.7"
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
+iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
 iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a", default-features = false, features = ["opendal-s3", "opendal-oss"] }
 deltalake = { version = "0.32.2", features = ["datafusion", "s3"] }
 deltalake-aws = "0.15.0"

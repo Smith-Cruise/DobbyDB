@@ -14,11 +14,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
-mod expr_to_predicate;
 mod metadata_scan;
 pub mod metadata_table_provider;
 mod table_provider;
-mod table_scan;
 
 pub struct IcebergTableProviderFactory {}
 
@@ -29,7 +27,7 @@ impl IcebergTableProviderFactory {
         metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
     ) -> Result<Arc<dyn TableProvider>> {
-        let (schema_name, table_name) = match table_reference {
+        let (schema_name, table_name) = match &table_reference {
             TableReference::Full {
                 catalog: _,
                 schema,
@@ -62,7 +60,8 @@ impl IcebergTableProviderFactory {
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_type)?;
             Ok(Arc::new(metadata_table_provider))
         } else {
-            let iceberg_table = IcebergTableProvider::try_new_from_table(iceberg_table, storage)?;
+            let iceberg_table =
+                IcebergTableProvider::try_new_from_table(table_reference, iceberg_table).await?;
             Ok(Arc::new(iceberg_table))
         }
     }

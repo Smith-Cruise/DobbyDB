@@ -1,40 +1,74 @@
-use crate::table_format::iceberg::table_scan::IcebergTableScanBuilder;
+use crate::catalog::TableDefinitionBuilder;
+use crate::table_format::TableFormat;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::Schema;
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::common::Result;
-use datafusion::common::{DataFusionError, ToDFSchema};
+use datafusion::common::{DataFusionError, TableReference};
 use datafusion::datasource::TableType;
-use datafusion::logical_expr::utils::conjunction;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
-use dobbydb_storage::storage::{Storage, try_register_storage_info_session};
 use iceberg::arrow::schema_to_arrow_schema;
+use iceberg::spec::Transform;
 use iceberg::table::Table;
+use iceberg_datafusion::IcebergStaticTableProvider;
 use std::any::Any;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct IcebergTableProvider {
-    table: Table,
-    snapshot_id: Option<i64>,
-    schema: Arc<Schema>,
-    storage: Option<Storage>,
+    inner: IcebergStaticTableProvider,
+    table_definition: String,
 }
 
 impl IcebergTableProvider {
-    pub fn try_new_from_table(table: Table, storage: Option<Storage>) -> Result<Self> {
-        let schema = Arc::new(
-            schema_to_arrow_schema(table.metadata().current_schema())
-                .map_err(|e| DataFusionError::External(Box::new(e)))?,
-        );
+    pub async fn try_new_from_table(table_reference: TableReference, table: Table) -> Result<Self> {
+        let table_definition = build_table_definition(&table_reference, &table)?;
+        let inner = IcebergStaticTableProvider::try_new_from_table(table)
+            .await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
         Ok(IcebergTableProvider {
-            table,
-            snapshot_id: None,
-            schema,
-            storage,
+            inner,
+            table_definition,
         })
     }
+}
+
+fn build_table_definition(table_reference: &TableReference, table: &Table) -> Result<String> {
+    let table_schema = schema_to_arrow_schema(table.metadata().current_schema())
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+    let partition_column_names = build_partition_column_names(table)?;
+
+    TableDefinitionBuilder::new(
+        TableFormat::Iceberg,
+        table_reference.clone(),
+        table_schema,
+        table.metadata().location(),
+    )
+    .with_partition_column_names(partition_column_names)
+    .build()
+}
+
+fn build_partition_column_names(table: &Table) -> Result<Vec<String>> {
+    let iceberg_schema = table.metadata().current_schema();
+    table
+        .metadata()
+        .default_partition_spec()
+        .fields()
+        .iter()
+        .filter(|partition_field| partition_field.transform != Transform::Void)
+        .map(|partition_field| {
+            let source_field = iceberg_schema
+                .field_by_id(partition_field.source_id)
+                .ok_or_else(|| {
+                    DataFusionError::Internal(format!(
+                        "partition source field id {} not found",
+                        partition_field.source_id
+                    ))
+                })?;
+            Ok(source_field.name.clone())
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -44,15 +78,15 @@ impl TableProvider for IcebergTableProvider {
     }
 
     fn schema(&self) -> Arc<Schema> {
-        self.schema.clone()
+        self.inner.schema()
     }
 
     fn table_type(&self) -> TableType {
-        TableType::Base
+        self.inner.table_type()
     }
 
     fn get_table_definition(&self) -> Option<&str> {
-        None
+        Some(&self.table_definition)
     }
 
     async fn scan(
@@ -60,35 +94,15 @@ impl TableProvider for IcebergTableProvider {
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
-        _limit: Option<usize>,
+        limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut builder = IcebergTableScanBuilder::new(self.table.clone(), self.schema.clone());
-
-        let df_schema = self.schema.as_ref().clone().to_dfschema()?;
-        let predicate = conjunction(filters.iter().cloned())
-            .and_then(|predicate| state.create_physical_expr(predicate, &df_schema).ok());
-
-        let metadata_location = if let Some(metadata_location) = self.table.metadata_location() {
-            metadata_location
-        } else {
-            Err(DataFusionError::Configuration(
-                "metadata location not found.".into(),
-            ))?
-        };
-        try_register_storage_info_session(self.storage.as_ref(), metadata_location, state)?;
-        builder = builder
-            .with_snapshot_id(self.snapshot_id)
-            .with_projection(projection)
-            .with_filters(Some(filters))
-            .with_predicate(predicate);
-        Ok(Arc::new(builder.build().await?))
+        self.inner.scan(state, projection, filters, limit).await
     }
 
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
     ) -> Result<Vec<TableProviderFilterPushDown>> {
-        // Push down all filters, as a single source of truth, the scanner will drop the filters which couldn't be push down
-        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
+        self.inner.supports_filters_pushdown(filters)
     }
 }
