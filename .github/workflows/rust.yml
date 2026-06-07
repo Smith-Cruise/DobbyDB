@@ -3,12 +3,8 @@ name: Rust
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "src/**"
   pull_request:
     branches: [ "main" ]
-    paths:
-      - "src/**"
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,18 +16,42 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Check source changes
+      id: changes
+      run: |
+        # Keep the required check visible for every PR, but only run Rust CI when src changes.
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+        else
+          base="${{ github.event.before }}"
+          head="${{ github.sha }}"
+        fi
+
+        if git diff --name-only "$base" "$head" | grep -q '^src/'; then
+          echo "src_changed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "src_changed=false" >> "$GITHUB_OUTPUT"
+        fi
     - name: Install Rust toolchain
+      if: steps.changes.outputs.src_changed == 'true'
       uses: dtolnay/rust-toolchain@stable
       with:
         components: clippy, rustfmt
     - name: Rust Cache
+      if: steps.changes.outputs.src_changed == 'true'
       uses: Swatinem/rust-cache@v2
       
     - name: Check formatting
+      if: steps.changes.outputs.src_changed == 'true'
       run: cargo fmt --all -- --check
       
     - name: Clippy check
+      if: steps.changes.outputs.src_changed == 'true'
       run: cargo clippy --all-targets --all-features -- -D warnings
       
     - name: Run tests
+      if: steps.changes.outputs.src_changed == 'true'
       run: cargo test --all-targets --all-features --verbose
