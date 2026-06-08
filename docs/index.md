@@ -1,17 +1,18 @@
-# Welcome to MkDocs
+---
+hide:
+  - navigation
+  - toc
+  - footer
+---
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
+<section class="ddb-hero" markdown>
 
-## Commands
+# Focused on Data Lake queries, powered by DataFusion
 
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
+DobbyDB is a query engine focused on data lake workloads. Query Iceberg,
+Delta Lake, and Hive tables through a unified SQL engine.
 
-## Project layout
+[Get started](getting-started.md){ .md-button .md-button--primary }
+[View on GitHub](https://github.com/Smith-Cruise/DobbyDB){ .md-button }
 
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+</section>

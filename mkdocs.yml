@@ -1,2 +1,50 @@
-site_name: My Docs
+site_name: DobbyDB
 site_url: https://smith-cruise.github.io/dobbydb/
+site_description: A DataFusion-based query engine for lakehouse workloads
+repo_url: https://github.com/Smith-Cruise/DobbyDB
+repo_name: Smith-Cruise/DobbyDB
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.footer
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Docs:
+      - Getting started: getting-started.md
+      - Catalog: catalog.md
+      - Table formats: table-format.md
+      - Storage: storage.md
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  generator: false
