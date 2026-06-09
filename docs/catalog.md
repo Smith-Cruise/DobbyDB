@@ -1,9 +1,6 @@
 # Catalog
 
-Catalogs connect DobbyDB to an external metastore. Configure each catalog as an
-array-of-tables entry under `catalog`. Multiple HMS and Glue entries can be
-declared in the same file, but every catalog name must be unique. The reserved
-`internal` catalog is created automatically and cannot be reused.
+DobbyDB support to connect HMS and Glue catalog.
 
 Storage settings are embedded directly in each catalog entry. See
 [Storage](storage.md) for their complete field reference.
@@ -30,7 +27,8 @@ The metastore URI is resolved as a socket address when the catalog is accessed.
 It must not include a URI scheme such as `thrift://`.
 
 Hive tables stored at `hdfs://` locations do not need a storage configuration
-block. DobbyDB reads the NameNode host and port from the table location.
+block. DobbyDB reads the NameNode host and port from the table location. Kerberos
+is not support yet.
 
 ## Glue
 
@@ -49,10 +47,6 @@ Static Glue credentials are used only when both `aws-glue-access-key` and
 `aws-glue-secret-key` are present. If either value is missing, the AWS SDK
 default credential chain and region resolution are used.
 
-Glue credentials authenticate metastore requests. Storage credentials
-authenticate reads of the underlying table data, so they may need to be
-configured separately.
-
 ```toml
 [[catalog.glue]]
 name = "glue_prod"
@@ -62,7 +56,7 @@ aws-glue-secret-key = "secret-key"
 s3-storage = { region = "us-west-2", access-key = "access-key", secret-key = "secret-key" }
 ```
 
-Catalog blocks are repeatable:
+Catalog blocks are repeatable, you can create multiple catalogs like:
 
 ```toml
 [[catalog.hms]]

@@ -34,8 +34,8 @@ nav:
       - Getting started: getting-started.md
       - Server: server.md
       - Catalog: catalog.md
-      - Table formats: table-format.md
       - Storage: storage.md
+      - Table formats: table-format.md
 
 markdown_extensions:
   - attr_list
