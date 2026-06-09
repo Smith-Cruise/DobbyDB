@@ -31,10 +31,11 @@ impl IcebergMetadataTableProvider {
         let metadata_table_type = match metadata_table_type {
             MetadataTableType::Snapshots => IcebergMetadataTableType::Snapshots,
             MetadataTableType::Manifests => IcebergMetadataTableType::Manifests,
-            MetadataTableType::DataFiles => {
-                return Err(DataFusionError::NotImplemented(
-                    "iceberg metadata table data_files is not supported".to_string(),
-                ));
+            MetadataTableType::DataFiles | MetadataTableType::Partitions => {
+                return Err(DataFusionError::NotImplemented(format!(
+                    "iceberg metadata table {:?} is not supported",
+                    metadata_table_type
+                )));
             }
         };
         Ok(IcebergMetadataTableProvider {

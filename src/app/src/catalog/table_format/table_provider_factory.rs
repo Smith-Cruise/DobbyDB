@@ -195,6 +195,10 @@ mod tests {
             ("tbl".to_string(), Some(MetadataTableType::DataFiles)),
             parse_table_reference("tbl$data_files").unwrap()
         );
+        assert_eq!(
+            ("tbl".to_string(), Some(MetadataTableType::Partitions)),
+            parse_table_reference("tbl$partitions").unwrap()
+        );
         assert!(parse_table_reference("tbl$file_path").is_err());
         assert!(parse_table_reference("tbl$unknown").is_err());
         assert!(parse_table_reference("$snapshots").is_err());
