@@ -1,4 +1,4 @@
-use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
+use crate::table_format::iceberg::iceberg_metadata_table_provider::IcebergMetadataTableProvider;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::physical_expr::EquivalenceProperties;
@@ -9,12 +9,12 @@ use futures::TryStreamExt;
 use std::sync::Arc;
 
 #[derive(Debug)]
-pub struct IcebergMetadataScan {
+pub struct IcebergMetadataTableScan {
     provider: IcebergMetadataTableProvider,
     properties: Arc<PlanProperties>,
 }
 
-impl IcebergMetadataScan {
+impl IcebergMetadataTableScan {
     pub fn new(provider: IcebergMetadataTableProvider) -> Self {
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(provider.schema()),
@@ -29,19 +29,19 @@ impl IcebergMetadataScan {
     }
 }
 
-impl DisplayAs for IcebergMetadataScan {
+impl DisplayAs for IcebergMetadataTableScan {
     fn fmt_as(
         &self,
         _t: datafusion::physical_plan::DisplayFormatType,
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
-        write!(f, "IcebergMetadataScan")
+        write!(f, "IcebergMetadataTableScan")
     }
 }
 
-impl ExecutionPlan for IcebergMetadataScan {
+impl ExecutionPlan for IcebergMetadataTableScan {
     fn name(&self) -> &str {
-        "IcebergMetadataScan"
+        "IcebergMetadataTableScan"
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

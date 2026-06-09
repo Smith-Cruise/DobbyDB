@@ -1,0 +1,50 @@
+# DobbyDB configuration demo.
+# Copy this file, adjust the values, and pass it via `--config <path>`.
+# All keys use kebab-case. Required fields are marked; everything else is optional.
+
+# ---------------------------------------------------------------------------
+# Server-wide settings.
+# ---------------------------------------------------------------------------
+[server]
+# Optional. Caps the query engine memory usage.
+# Accepts a number with an optional unit suffix (case-insensitive):
+# b, kb, mb, gb, tb. A bare number is treated as bytes. Example: "4GB".
+memory-limit = "4GB"
+
+# ---------------------------------------------------------------------------
+# Glue catalogs. Repeat the [[catalog.glue]] block for each catalog.
+# ---------------------------------------------------------------------------
+[[catalog.glue]]
+# Required. Unique catalog name used in SQL (e.g. `use catalog glue_catalog;`).
+name = "glue_catalog"
+# Optional. AWS region of the Glue metastore.
+aws-glue-region = "us-west-2"
+# Optional. Static credentials for Glue. If omitted, the default AWS
+# credential chain (env vars, profile, IAM role, ...) is used.
+aws-glue-access-key = "ak"
+aws-glue-secret-key = "sk"
+# Optional. Object-store credentials used to read the underlying table data.
+# Provide an `s3-storage` block for s3:// / s3a:// locations.
+s3-storage = { region = "us-west-2", access-key = "ak", secret-key = "sk" }
+
+# ---------------------------------------------------------------------------
+# Hive Metastore (HMS) catalogs. Repeat the block for each catalog.
+# ---------------------------------------------------------------------------
+[[catalog.hms]]
+# Required. Unique catalog name used in SQL.
+name = "hms_1"
+# Required. Thrift metastore address as host:port.
+metastore-uri = "127.0.0.1:9087"
+# Optional storage credentials, matched by the table location scheme:
+#   s3:// or s3a://  -> s3-storage
+#   oss://           -> oss-storage
+#   hdfs://          -> no storage config needed (the NameNode host:port is
+#                       taken from the table location authority)
+#
+# s3-storage keys (all optional):
+#   region, endpoint, access-key, secret-key, path-style-access (bool, default false)
+# s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
+#
+# oss-storage keys (all optional):
+#   endpoint, access-key, secret-key, path-style-access (bool, default false)
+# oss-storage = { endpoint = "https://oss-cn-hangzhou.aliyuncs.com", access-key = "ak", secret-key = "sk", path-style-access = false }

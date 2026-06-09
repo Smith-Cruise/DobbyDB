@@ -1,4 +1,4 @@
-use crate::table_format::iceberg::metadata_scan::IcebergMetadataScan;
+use crate::table_format::iceberg::iceberg_metadata_scan::IcebergMetadataTableScan;
 use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
@@ -31,10 +31,11 @@ impl IcebergMetadataTableProvider {
         let metadata_table_type = match metadata_table_type {
             MetadataTableType::Snapshots => IcebergMetadataTableType::Snapshots,
             MetadataTableType::Manifests => IcebergMetadataTableType::Manifests,
-            MetadataTableType::FilePath => {
-                return Err(DataFusionError::NotImplemented(
-                    "iceberg metadata table file_path is not supported".to_string(),
-                ));
+            MetadataTableType::DataFiles | MetadataTableType::Partitions => {
+                return Err(DataFusionError::NotImplemented(format!(
+                    "iceberg metadata table {:?} is not supported",
+                    metadata_table_type
+                )));
             }
         };
         Ok(IcebergMetadataTableProvider {
@@ -70,7 +71,7 @@ impl TableProvider for IcebergMetadataTableProvider {
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergMetadataScan::new(self.clone())))
+        Ok(Arc::new(IcebergMetadataTableScan::new(self.clone())))
     }
 }
 

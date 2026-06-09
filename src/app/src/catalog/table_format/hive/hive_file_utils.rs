@@ -8,11 +8,27 @@ use futures::StreamExt;
 use std::sync::Arc;
 use url::Url;
 
+/// Lists files from all directories and returns them as one flattened collection.
 pub(super) async fn list_files_by_directories(
     state: &dyn Session,
     object_store: &Arc<dyn ObjectStore>,
     dir_locations: Vec<String>,
 ) -> Result<Vec<ObjectMeta>> {
+    Ok(
+        list_files_by_directories_grouped(state, object_store, dir_locations)
+            .await?
+            .into_iter()
+            .flatten()
+            .collect(),
+    )
+}
+
+/// Lists files per directory, preserving the input directory order in the outer collection.
+pub(super) async fn list_files_by_directories_grouped(
+    state: &dyn Session,
+    object_store: &Arc<dyn ObjectStore>,
+    dir_locations: Vec<String>,
+) -> Result<Vec<Vec<ObjectMeta>>> {
     let concurrency = state.config_options().execution.meta_fetch_concurrency;
     let tasks = dir_locations.into_iter().map(|location| {
         let object_store = Arc::clone(object_store);
@@ -20,14 +36,12 @@ pub(super) async fn list_files_by_directories(
         async move { list_files(state, &object_store, &location).await }
     });
 
-    let results = futures::stream::iter(tasks)
-        .buffer_unordered(concurrency)
+    futures::stream::iter(tasks)
+        .buffered(concurrency)
         .collect::<Vec<_>>()
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(results.into_iter().flatten().collect())
+        .collect()
 }
 
 pub(super) async fn list_files(
