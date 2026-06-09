@@ -1,8 +1,6 @@
 # Getting Started
 
-DobbyDB reads its configuration from a TOML file. The configuration defines
-the query engine's memory limit, catalogs, and the storage credentials used to
-read table data.
+DobbyDB's philosophy is to be simple, run on a single machine, and be easy to use.
 
 ## Build DobbyDB
 
@@ -10,7 +8,9 @@ DobbyDB requires a Rust toolchain. Build the release binary from the repository
 root:
 
 ```bash
-./build.sh
+git clone https://github.com/smith-Cruise/dobbydb/
+cd DobbyDb
+cargo build --release
 ```
 
 The binary is written to `target/release/dobbydb`.
@@ -27,7 +27,7 @@ A configuration file can contain the following top-level sections:
 
 | Section | Required | Description |
 | --- | --- | --- |
-| `[server]` | No | Server-wide settings, currently limited to the query engine memory limit. |
+| `[server]` | No | Server-wide settings. |
 | `[[catalog.hms]]` | No | A Hive Metastore catalog. Repeat the block to configure multiple HMS catalogs. |
 | `[[catalog.glue]]` | No | An AWS Glue catalog. Repeat the block to configure multiple Glue catalogs. |
 
@@ -38,16 +38,12 @@ is configured.
 The following is a minimal HMS configuration:
 
 ```toml
-[server]
-memory-limit = "4GB"
-
 [[catalog.hms]]
 name = "hms"
 metastore-uri = "127.0.0.1:9083"
 ```
 
-Add an `s3-storage` or `oss-storage` entry to the catalog when its tables use
-object storage and explicit credentials or a custom endpoint are required:
+Add an `s3-storage` or `oss-storage` entry to the catalog when its tables use object storage:
 
 ```toml
 [[catalog.hms]]
@@ -67,5 +63,6 @@ Pass the configuration file with `--config`:
 target/release/dobbydb --config config.toml
 ```
 
-The configuration file is required for normal execution. Configuration keys
-use kebab-case, and invalid values for recognized fields cause startup to fail.
+The configuration file is required for normal execution.
+
+You can get more help by `target/release/dobbydb --help`.
