@@ -7,7 +7,8 @@ use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 use sqlparser::ast::ShowStatementFilter;
-use sqlparser::dialect::{Dialect, GenericDialect};
+use sqlparser::dialect::{DatabricksDialect, Dialect};
+use std::any::TypeId;
 use std::collections::VecDeque;
 
 // Use `Parser::expected` instead, if possible
@@ -23,20 +24,80 @@ macro_rules! parser_err {
 }
 
 const DEFAULT_RECURSION_LIMIT: usize = 50;
-const DEFAULT_DIALECT: GenericDialect = GenericDialect {};
+const DEFAULT_DIALECT: DobbyDialect = DobbyDialect {};
+
+#[derive(Debug)]
+struct DobbyDialect;
+
+impl Dialect for DobbyDialect {
+    fn dialect(&self) -> TypeId {
+        TypeId::of::<DatabricksDialect>()
+    }
+
+    fn is_delimited_identifier_start(&self, ch: char) -> bool {
+        matches!(ch, '`')
+    }
+
+    fn is_identifier_start(&self, ch: char) -> bool {
+        matches!(ch, 'a'..='z' | 'A'..='Z' | '_')
+    }
+
+    fn is_identifier_part(&self, ch: char) -> bool {
+        matches!(ch, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '$')
+    }
+
+    fn supports_filter_during_aggregation(&self) -> bool {
+        true
+    }
+
+    fn supports_group_by_expr(&self) -> bool {
+        true
+    }
+
+    fn supports_table_versioning(&self) -> bool {
+        true
+    }
+
+    fn supports_lambda_functions(&self) -> bool {
+        true
+    }
+
+    fn supports_select_wildcard_except(&self) -> bool {
+        true
+    }
+
+    fn require_interval_qualifier(&self) -> bool {
+        true
+    }
+
+    fn supports_struct_literal(&self) -> bool {
+        true
+    }
+
+    fn supports_nested_comments(&self) -> bool {
+        true
+    }
+
+    fn supports_group_by_with_modifier(&self) -> bool {
+        true
+    }
+
+    fn supports_values_as_table_factor(&self) -> bool {
+        true
+    }
+}
 
 pub struct ExtendedParserBuilder<'a> {
     /// The SQL string to parse
     sql: &'a str,
-    /// The Dialect to use (defaults to [`GenericDialect`]
+    /// The Dialect to use.
     dialect: &'a dyn Dialect,
     /// The recursion limit while parsing
     recursion_limit: usize,
 }
 
 impl<'a> ExtendedParserBuilder<'a> {
-    /// Create a new parser builder for the specified tokens using the
-    /// [`GenericDialect`].
+    /// Create a new parser builder for the specified tokens.
     pub fn new(sql: &'a str) -> Self {
         Self {
             sql,
