@@ -8,8 +8,8 @@ DobbyDB requires a Rust toolchain. Build the release binary from the repository
 root:
 
 ```bash
-git clone https://github.com/smith-Cruise/dobbydb/
-cd DobbyDb
+git clone https://github.com/Smith-Cruise/DobbyDB.git
+cd DobbyDB
 cargo build --release
 ```
 
