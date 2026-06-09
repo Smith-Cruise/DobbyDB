@@ -64,13 +64,13 @@ The same as `iceberg-rust`.
 **snapshots**
 
 ```sql
-SELECT * FROM "table_name$snapshots";
+SELECT * FROM `table_name$snapshots`;
 ```
 
 **manifests**
 
 ```sql
-SELECT * FROM "table_name$manifests";
+SELECT * FROM `table_name$manifests`;
 ```
 
 ## Delta Lake

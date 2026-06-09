@@ -1,5 +1,5 @@
 ## Project Description
-DobbyDB is a datafusion based query engine. It focuses on lakehouse query.
+DobbyDB is a datafusion based query engine. It focuses on data lake query.
 
 ### Supported Table Format
 * Iceberg (parquet)
@@ -13,8 +13,9 @@ DobbyDB is a datafusion based query engine. It focuses on lakehouse query.
 ## Agents rules
 Agents should follow below rules:
 
-* Reply based on the language used in the user's question.
+* The language of the response matches the language of the user's question.
 * Code's comments, commit message, pull request must use English.
+* If config items are modified, please note that the `@docs/` needs to be updated.
 * Keep the PR descriptions as concise as possible.
 
 ### Pull request checklist
