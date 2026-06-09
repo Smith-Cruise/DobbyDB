@@ -7,7 +7,7 @@ use datafusion::logical_expr::sqlparser::keywords::Keyword;
 use datafusion::logical_expr::sqlparser::parser::{Parser, ParserError};
 use datafusion::logical_expr::sqlparser::tokenizer::{Token, TokenWithSpan, Tokenizer};
 use sqlparser::ast::ShowStatementFilter;
-use sqlparser::dialect::{DatabricksDialect, Dialect};
+use sqlparser::dialect::{Dialect, GenericDialect};
 use std::collections::VecDeque;
 
 // Use `Parser::expected` instead, if possible
@@ -23,7 +23,7 @@ macro_rules! parser_err {
 }
 
 const DEFAULT_RECURSION_LIMIT: usize = 50;
-const DEFAULT_DIALECT: DatabricksDialect = DatabricksDialect {};
+const DEFAULT_DIALECT: GenericDialect = GenericDialect {};
 
 pub struct ExtendedParserBuilder<'a> {
     /// The SQL string to parse

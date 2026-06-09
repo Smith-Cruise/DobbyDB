@@ -42,11 +42,23 @@ supported.
 The `data_files` metadata table lists visible, non-empty data files:
 
 ```sql
-SELECT * FROM "table_name$data_files";
+SELECT * FROM `table_name$data_files`;
 ```
 
 It returns `file_path` and `file_size`. Files whose names start with `_` or `.`
 and zero-byte files are excluded.
+
+**partitions**
+
+The `partitions` metadata table returns one row for each metastore partition:
+
+```sql
+SELECT * FROM `table_name$partitions`;
+```
+
+It returns `partition`, `data_file_count`, and `total_data_file_size`.
+`partition` is a string such as `dt=2026-01-01/country=CN`.
+An unpartitioned table returns no rows.
 
 ## Iceberg
 
