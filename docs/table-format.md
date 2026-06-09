@@ -37,12 +37,12 @@ supported.
 
 ### Metadata Table
 
-**file_path**
+**data_files**
 
-The `file_path` metadata table lists visible, non-empty data files:
+The `data_files` metadata table lists visible, non-empty data files:
 
 ```sql
-SELECT * FROM "table_name$file_path";
+SELECT * FROM "table_name$data_files";
 ```
 
 It returns `file_path` and `file_size`. Files whose names start with `_` or `.`

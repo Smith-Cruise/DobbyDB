@@ -714,7 +714,7 @@ mod tests {
     #[test]
     fn test_resolve_show_create_table_references_rejects_metadata_table() -> Result<()> {
         let session = ExtendedSessionContext::default();
-        let stmt = ExtendedParser::parse_sql("show create table \"tbl$file_path\"")?;
+        let stmt = ExtendedParser::parse_sql("show create table \"tbl$data_files\"")?;
         if let ExtendedStatement::SQLStatement(stmt) = &stmt[0]
             && let Statement::ShowCreate { obj_name, obj_type } = stmt.as_ref()
         {

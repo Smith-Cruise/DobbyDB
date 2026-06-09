@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataTableType {
-    FilePath,
+    DataFiles,
     Snapshots,
     Manifests,
 }
@@ -10,7 +10,7 @@ impl TryFrom<&str> for MetadataTableType {
 
     fn try_from(metadata_table_name: &str) -> Result<Self, Self::Error> {
         match metadata_table_name {
-            "file_path" => Ok(MetadataTableType::FilePath),
+            "data_files" => Ok(MetadataTableType::DataFiles),
             "snapshots" => Ok(MetadataTableType::Snapshots),
             "manifests" => Ok(MetadataTableType::Manifests),
             _ => Err(format!(
