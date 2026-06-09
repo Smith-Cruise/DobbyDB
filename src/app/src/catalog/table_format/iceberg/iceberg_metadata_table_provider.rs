@@ -1,4 +1,4 @@
-use crate::table_format::iceberg::metadata_scan::IcebergMetadataScan;
+use crate::table_format::iceberg::iceberg_metadata_scan::IcebergMetadataTableScan;
 use crate::table_format::metadata_table::MetadataTableType;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
@@ -71,7 +71,7 @@ impl TableProvider for IcebergMetadataTableProvider {
         _filters: &[Expr],
         _limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        Ok(Arc::new(IcebergMetadataScan::new(self.clone())))
+        Ok(Arc::new(IcebergMetadataTableScan::new(self.clone())))
     }
 }
 

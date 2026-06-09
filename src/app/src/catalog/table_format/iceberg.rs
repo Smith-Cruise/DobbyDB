@@ -1,5 +1,5 @@
-use crate::table_format::iceberg::metadata_table_provider::IcebergMetadataTableProvider;
-use crate::table_format::iceberg::table_provider::IcebergTableProvider;
+use crate::table_format::iceberg::iceberg_metadata_table_provider::IcebergMetadataTableProvider;
+use crate::table_format::iceberg::iceberg_table_provider::IcebergTableProvider;
 use crate::table_format::metadata_table::MetadataTableType;
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
@@ -14,9 +14,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
-mod metadata_scan;
-pub mod metadata_table_provider;
-mod table_provider;
+mod iceberg_metadata_scan;
+pub mod iceberg_metadata_table_provider;
+mod iceberg_table_provider;
 
 pub struct IcebergTableProviderFactory {}
 
@@ -56,9 +56,9 @@ impl IcebergTableProviderFactory {
                 .into_table();
 
         if let Some(metadata_table_type) = metadata_table_type {
-            let metadata_table_provider =
+            let iceberg_metadata_table_provider =
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_type)?;
-            Ok(Arc::new(metadata_table_provider))
+            Ok(Arc::new(iceberg_metadata_table_provider))
         } else {
             let iceberg_table =
                 IcebergTableProvider::try_new_from_table(table_reference, iceberg_table).await?;
