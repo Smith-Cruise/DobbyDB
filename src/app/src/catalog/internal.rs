@@ -1,4 +1,4 @@
-use crate::catalog::{CatalogConfig, CatalogManager, DobbyDbCatalogProvider};
+use crate::catalog::DobbyDbCatalogProvider;
 use crate::context::DobbyDbContext;
 use async_trait::async_trait;
 use datafusion::arrow::array::{RecordBatch, StringBuilder};
@@ -15,9 +15,6 @@ use datafusion::physical_plan::streaming::PartitionStream;
 use std::sync::Arc;
 
 pub const INTERNAL_CATALOG: &str = "internal";
-pub const INFORMATION_SCHEMA_SHOW_CATALOGS: &str = "catalogs";
-pub const INFORMATION_SCHEMA_SHOW_SCHEMAS: &str = "schemas";
-pub const INFORMATION_SCHEMA_SHOW_TABLES: &str = "tables";
 pub const INFORMATION_SCHEMA_SHOW_VARIABLES: &str = "variables";
 
 pub fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<Arc<StreamingTable>> {
@@ -28,12 +25,14 @@ pub fn wrap_with_stream_table(table: Arc<dyn PartitionStream>) -> Result<Arc<Str
 }
 
 pub struct InternalCatalog {
-    dobbydb_context: Arc<DobbyDbContext>,
+    _dobbydb_context: Arc<DobbyDbContext>,
 }
 
 impl InternalCatalog {
     pub fn new(dobbydb_context: Arc<DobbyDbContext>) -> Self {
-        Self { dobbydb_context }
+        Self {
+            _dobbydb_context: dobbydb_context,
+        }
     }
 }
 
@@ -46,16 +45,11 @@ impl DobbyDbCatalogProvider for InternalCatalog {
     async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>> {
         if schema_name != INFORMATION_SCHEMA {
             return Err(DataFusionError::Plan(format!(
-                "{} schema not exist",
+                "schema {} not exist",
                 schema_name
             )));
         }
-        Ok(vec![
-            INFORMATION_SCHEMA_SHOW_CATALOGS.to_string(),
-            INFORMATION_SCHEMA_SHOW_SCHEMAS.to_string(),
-            INFORMATION_SCHEMA_SHOW_TABLES.to_string(),
-            INFORMATION_SCHEMA_SHOW_VARIABLES.to_string(),
-        ])
+        Ok(vec![INFORMATION_SCHEMA_SHOW_VARIABLES.to_string()])
     }
 
     async fn schema_exist(&self, schema_name: &str) -> Result<bool> {
@@ -73,232 +67,25 @@ impl DobbyDbCatalogProvider for InternalCatalog {
 impl AsyncCatalogProvider for InternalCatalog {
     async fn schema(&self, schema_name: &str) -> Result<Option<Arc<dyn AsyncSchemaProvider>>> {
         if schema_name == INFORMATION_SCHEMA {
-            Ok(Some(Arc::new(InformationSchema::new(
-                self.dobbydb_context.catalog_manager.clone(),
-            ))))
+            Ok(Some(Arc::new(InformationSchema)))
         } else {
             Ok(None)
         }
     }
 }
 
-struct InformationSchema {
-    catalog_manager: Arc<CatalogManager>,
-}
-
-impl InformationSchema {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        Self { catalog_manager }
-    }
-}
+struct InformationSchema;
 
 #[async_trait]
 impl AsyncSchemaProvider for InformationSchema {
     async fn table(&self, table_name: &str) -> Result<Option<Arc<dyn TableProvider>>> {
-        if table_name == INFORMATION_SCHEMA_SHOW_CATALOGS {
-            Ok(Some(wrap_with_stream_table(Arc::new(
-                InformationSchemaShowCatalogs::new(self.catalog_manager.clone()),
-            ))?))
-        } else if table_name == INFORMATION_SCHEMA_SHOW_SCHEMAS {
-            Ok(Some(wrap_with_stream_table(Arc::new(
-                InformationSchemaShowSchemas::new(self.catalog_manager.clone()),
-            ))?))
-        } else if table_name == INFORMATION_SCHEMA_SHOW_TABLES {
-            Ok(Some(wrap_with_stream_table(Arc::new(
-                InformationSchemaShowTables::new(self.catalog_manager.clone()),
-            ))?))
-        } else if table_name == INFORMATION_SCHEMA_SHOW_VARIABLES {
+        if table_name == INFORMATION_SCHEMA_SHOW_VARIABLES {
             Ok(Some(wrap_with_stream_table(Arc::new(
                 InformationSchemaShowVariables::new(),
             ))?))
         } else {
             Ok(None)
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct InformationSchemaShowCatalogs {
-    catalog_manager: Arc<CatalogManager>,
-    schema: SchemaRef,
-}
-
-impl InformationSchemaShowCatalogs {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        let schema: SchemaRef = Arc::new(Schema::new(vec![
-            Field::new("catalog_name", DataType::Utf8, false),
-            Field::new("catalog_type", DataType::Utf8, false),
-            Field::new("catalog_config", DataType::Utf8, true),
-        ]));
-
-        InformationSchemaShowCatalogs {
-            catalog_manager,
-            schema,
-        }
-    }
-}
-
-impl PartitionStream for InformationSchemaShowCatalogs {
-    fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
-
-    fn execute(&self, _ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-        let mut catalog_name_builder = StringBuilder::new();
-        let mut catalog_type_builder = StringBuilder::new();
-        let mut catalog_configs_builder = StringBuilder::new();
-
-        let all_catalogs = self.catalog_manager.list_catalogs();
-        for (catalog_name, catalog_config) in &all_catalogs {
-            catalog_name_builder.append_value(catalog_name);
-            if catalog_name == INTERNAL_CATALOG {
-                catalog_type_builder.append_value("INTERNAL");
-                catalog_configs_builder.append_null();
-                continue;
-            }
-
-            match catalog_config {
-                CatalogConfig::HMS(hms_catalog) => {
-                    catalog_type_builder.append_value("HMS");
-                    catalog_configs_builder.append_value(format!("{:?}", hms_catalog));
-                }
-                CatalogConfig::GLUE(glue_catalog) => {
-                    catalog_type_builder.append_value("GLUE");
-                    catalog_configs_builder.append_value(format!("{:?}", glue_catalog));
-                }
-                CatalogConfig::Internal => {
-                    catalog_type_builder.append_value("INTERNAL");
-                    catalog_configs_builder.append_null();
-                }
-            }
-        }
-        let batch = match RecordBatch::try_new(
-            Arc::clone(&self.schema),
-            vec![
-                Arc::new(catalog_name_builder.finish()),
-                Arc::new(catalog_type_builder.finish()),
-                Arc::new(catalog_configs_builder.finish()),
-            ],
-        ) {
-            Ok(record_batch) => record_batch,
-            Err(error) => {
-                let error = DataFusionError::External(Box::new(error));
-                return Box::pin(RecordBatchStreamAdapter::new(
-                    self.schema.clone(),
-                    futures::stream::once(async move { Err(error) }),
-                ));
-            }
-        };
-
-        Box::pin(RecordBatchStreamAdapter::new(
-            Arc::clone(&self.schema),
-            futures::stream::once(async move { Ok(batch) }),
-        ))
-    }
-}
-
-#[derive(Debug)]
-pub struct InformationSchemaShowSchemas {
-    catalog_manager: Arc<CatalogManager>,
-    schema: SchemaRef,
-}
-
-impl InformationSchemaShowSchemas {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        let schema: SchemaRef = Arc::new(Schema::new(vec![Field::new(
-            "schema_name",
-            DataType::Utf8,
-            false,
-        )]));
-
-        InformationSchemaShowSchemas {
-            catalog_manager,
-            schema,
-        }
-    }
-}
-
-impl PartitionStream for InformationSchemaShowSchemas {
-    fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
-
-    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-        let catalog = &ctx.session_config().options().catalog;
-        let default_catalog = catalog.default_catalog.clone();
-        let catalog_manager = self.catalog_manager.clone();
-        let schema = Arc::clone(&self.schema);
-
-        Box::pin(RecordBatchStreamAdapter::new(
-            Arc::clone(&schema),
-            futures::stream::once(async move {
-                let schema_names = catalog_manager.list_schema_names(&default_catalog).await?;
-                let mut schema_name_builder = StringBuilder::new();
-                for schema_name in schema_names {
-                    schema_name_builder.append_value(schema_name);
-                }
-
-                RecordBatch::try_new(
-                    Arc::clone(&schema),
-                    vec![Arc::new(schema_name_builder.finish())],
-                )
-                .map_err(|error| DataFusionError::External(Box::new(error)))
-            }),
-        ))
-    }
-}
-
-#[derive(Debug)]
-struct InformationSchemaShowTables {
-    catalog_manager: Arc<CatalogManager>,
-    schema: SchemaRef,
-}
-
-impl InformationSchemaShowTables {
-    pub fn new(catalog_manager: Arc<CatalogManager>) -> Self {
-        let schema: SchemaRef = Arc::new(Schema::new(vec![Field::new(
-            "table_name",
-            DataType::Utf8,
-            false,
-        )]));
-
-        InformationSchemaShowTables {
-            catalog_manager,
-            schema,
-        }
-    }
-}
-
-impl PartitionStream for InformationSchemaShowTables {
-    fn schema(&self) -> &SchemaRef {
-        &self.schema
-    }
-
-    fn execute(&self, ctx: Arc<TaskContext>) -> SendableRecordBatchStream {
-        let catalog = &ctx.session_config().options().catalog;
-        let default_catalog = catalog.default_catalog.clone();
-        let default_schema = catalog.default_schema.clone();
-        let catalog_manager = self.catalog_manager.clone();
-        let schema = Arc::clone(&self.schema);
-
-        Box::pin(RecordBatchStreamAdapter::new(
-            Arc::clone(&schema),
-            futures::stream::once(async move {
-                let table_names = catalog_manager
-                    .list_table_names(&default_catalog, &default_schema)
-                    .await?;
-                let mut schema_name_builder = StringBuilder::new();
-                for table_name in table_names {
-                    schema_name_builder.append_value(table_name);
-                }
-
-                RecordBatch::try_new(
-                    Arc::clone(&schema),
-                    vec![Arc::new(schema_name_builder.finish())],
-                )
-                .map_err(|error| DataFusionError::External(Box::new(error)))
-            }),
-        ))
     }
 }
 

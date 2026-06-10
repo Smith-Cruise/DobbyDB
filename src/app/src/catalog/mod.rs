@@ -6,10 +6,7 @@ pub(crate) mod manager;
 pub(crate) mod table_definition_build;
 pub(crate) mod table_format;
 
-pub(crate) use internal::{
-    INFORMATION_SCHEMA_SHOW_CATALOGS, INFORMATION_SCHEMA_SHOW_SCHEMAS,
-    INFORMATION_SCHEMA_SHOW_TABLES, INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
-};
+pub(crate) use internal::{INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG};
 pub(crate) use manager::{
     CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
     DobbyDbCatalogProviderList,

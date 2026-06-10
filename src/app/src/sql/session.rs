@@ -1,7 +1,6 @@
 use crate::catalog::{
-    CatalogManager, DobbyDbCatalogProviderList, INFORMATION_SCHEMA_SHOW_CATALOGS,
-    INFORMATION_SCHEMA_SHOW_SCHEMAS, INFORMATION_SCHEMA_SHOW_TABLES,
-    INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG,
+    CatalogConfig, CatalogManager, DobbyDbCatalogProviderList, INFORMATION_SCHEMA_SHOW_VARIABLES,
+    INTERNAL_CATALOG,
 };
 use crate::context::DobbyDbContext;
 use crate::parser::ExtendedParser;
@@ -19,10 +18,10 @@ use datafusion::execution::TaskContext;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::logical_expr::sqlparser::ast::{
     ObjectName, ObjectNamePart, ShowCreateObject, ShowStatementFilter, ShowStatementFilterPosition,
-    ShowStatementOptions, Statement, Use,
+    ShowStatementInParentType, ShowStatementOptions, Statement, Use,
 };
 use datafusion::logical_expr::{ExplainFormat, LogicalPlanBuilder};
-use datafusion::prelude::{SessionConfig, SessionContext};
+use datafusion::prelude::{SessionConfig, SessionContext, col, lit};
 use datafusion::sql::parser::Statement as DataFusionStatement;
 use dobbydb_common::runtime::RuntimeManager;
 use std::collections::HashMap;
@@ -124,7 +123,7 @@ impl ExtendedSessionContext {
     pub async fn create_dataframe(&self, statement: &ExtendedStatement) -> Result<DataFrame> {
         let sql_string: String = match statement {
             ExtendedStatement::ShowCatalogsStatement(show_catalogs) => {
-                self.build_show_catalogs_sql(show_catalogs)?
+                return self.handle_show_catalogs(show_catalogs);
             }
             ExtendedStatement::ShowVariablesStatement(show_variables) => {
                 self.build_show_variables_sql(&show_variables.filter, show_variables.verbose)?
@@ -134,10 +133,10 @@ impl ExtendedSessionContext {
                     return self.handle_use_stmt(use_stmt).await;
                 }
                 Statement::ShowSchemas { show_options, .. } => {
-                    self.build_show_schemas_sql(show_options)?
+                    return self.handle_show_schemas(show_options).await;
                 }
                 Statement::ShowTables { show_options, .. } => {
-                    self.build_show_tables_sql(show_options)?
+                    return self.handle_show_tables(show_options).await;
                 }
                 _ => stmt.to_string(),
             },
@@ -218,30 +217,6 @@ impl ExtendedSessionContext {
         Ok(format!("{base_sql} ORDER BY NAME"))
     }
 
-    fn build_show_catalogs_sql(&self, show_catalogs: &ShowCatalogsStatement) -> Result<String> {
-        self.build_filtered_virtual_table_sql(
-            INFORMATION_SCHEMA_SHOW_CATALOGS,
-            "catalog_name",
-            &show_catalogs.filter,
-        )
-    }
-
-    fn build_show_schemas_sql(&self, show_options: &ShowStatementOptions) -> Result<String> {
-        self.build_filtered_virtual_table_sql(
-            INFORMATION_SCHEMA_SHOW_SCHEMAS,
-            "schema_name",
-            &Self::show_like_filter(show_options),
-        )
-    }
-
-    fn build_show_tables_sql(&self, show_options: &ShowStatementOptions) -> Result<String> {
-        self.build_filtered_virtual_table_sql(
-            INFORMATION_SCHEMA_SHOW_TABLES,
-            "table_name",
-            &Self::show_like_filter(show_options),
-        )
-    }
-
     fn show_like_filter(show_options: &ShowStatementOptions) -> Option<ShowStatementFilter> {
         match &show_options.filter_position {
             None => None,
@@ -255,29 +230,160 @@ impl ExtendedSessionContext {
         }
     }
 
-    fn build_filtered_virtual_table_sql(
-        &self,
-        table_name: &str,
-        column_name: &str,
-        filter: &Option<ShowStatementFilter>,
-    ) -> Result<String> {
-        let base_sql = format!(
-            "SELECT * FROM {}.{}.{}",
-            INTERNAL_CATALOG, INFORMATION_SCHEMA, table_name
-        );
+    fn handle_show_catalogs(&self, show_catalogs: &ShowCatalogsStatement) -> Result<DataFrame> {
+        let catalogs = self.dobbydb_context.catalog_manager.list_catalogs();
+        let mut catalog_names = Vec::with_capacity(catalogs.len());
+        let mut catalog_types = Vec::with_capacity(catalogs.len());
+        let mut catalog_configs = Vec::with_capacity(catalogs.len());
 
-        let base_sql = match filter {
-            None => base_sql,
-            Some(ShowStatementFilter::Like(pattern)) => {
-                format!(
-                    "{base_sql} WHERE {column_name} LIKE '{}'",
-                    Self::escape_sql_string(pattern)
-                )
+        for (catalog_name, catalog_config) in catalogs {
+            catalog_names.push(catalog_name);
+            match catalog_config {
+                CatalogConfig::Internal => {
+                    catalog_types.push("INTERNAL".to_string());
+                    catalog_configs.push(None);
+                }
+                CatalogConfig::HMS(config) => {
+                    catalog_types.push("HMS".to_string());
+                    catalog_configs.push(Some(format!("{config:?}")));
+                }
+                CatalogConfig::GLUE(config) => {
+                    catalog_types.push("GLUE".to_string());
+                    catalog_configs.push(Some(format!("{config:?}")));
+                }
             }
-            _ => base_sql,
-        };
+        }
 
-        Ok(format!("{base_sql} ORDER BY {column_name}"))
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("catalog_name", DataType::Utf8, false),
+            Field::new("catalog_type", DataType::Utf8, false),
+            Field::new("catalog_config", DataType::Utf8, true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(catalog_names)),
+                Arc::new(StringArray::from(catalog_types)),
+                Arc::new(StringArray::from(catalog_configs)),
+            ],
+        )
+        .map_err(|error| DataFusionError::External(Box::new(error)))?;
+        let mut dataframe = self.session_context.read_batch(batch)?;
+        if let Some(ShowStatementFilter::Like(pattern)) = &show_catalogs.filter {
+            dataframe = dataframe.filter(col("catalog_name").like(lit(pattern.clone())))?;
+        }
+        dataframe.sort(vec![col("catalog_name").sort(true, false)])
+    }
+
+    async fn handle_show_schemas(&self, show_options: &ShowStatementOptions) -> Result<DataFrame> {
+        let default_catalog = self
+            .session_context
+            .state()
+            .config()
+            .options()
+            .catalog
+            .default_catalog
+            .clone();
+        let catalog_name = Self::resolve_show_scope(show_options, "SHOW SCHEMAS", 1)?
+            .map_or_else(|| default_catalog, |parts| parts[0].clone());
+
+        let schema_names = self
+            .dobbydb_context
+            .catalog_manager
+            .list_schema_names(&catalog_name)
+            .await?;
+        self.build_show_names_dataframe(
+            "schema_name",
+            schema_names,
+            Self::show_like_filter(show_options),
+        )
+    }
+
+    async fn handle_show_tables(&self, show_options: &ShowStatementOptions) -> Result<DataFrame> {
+        let state = self.session_context.state();
+        let catalog_options = &state.config().options().catalog;
+        let default_catalog = catalog_options.default_catalog.clone();
+        let default_schema = catalog_options.default_schema.clone();
+        let (catalog_name, schema_name) =
+            match Self::resolve_show_scope(show_options, "SHOW TABLES", 2)? {
+                None => (default_catalog, default_schema),
+                Some(parts) if parts.len() == 1 => (default_catalog, parts[0].clone()),
+                Some(parts) => (parts[0].clone(), parts[1].clone()),
+            };
+
+        let table_names = self
+            .dobbydb_context
+            .catalog_manager
+            .list_table_names(&catalog_name, &schema_name)
+            .await?;
+        self.build_show_names_dataframe(
+            "table_name",
+            table_names,
+            Self::show_like_filter(show_options),
+        )
+    }
+
+    fn resolve_show_scope(
+        show_options: &ShowStatementOptions,
+        statement_name: &str,
+        max_parts: usize,
+    ) -> Result<Option<Vec<String>>> {
+        let Some(show_in) = &show_options.show_in else {
+            return Ok(None);
+        };
+        if show_in.parent_type.as_ref().is_some_and(|parent_type| {
+            !matches!(
+                parent_type,
+                ShowStatementInParentType::Database | ShowStatementInParentType::Schema
+            )
+        }) {
+            return Err(DataFusionError::Plan(format!(
+                "{statement_name} does not support {} scope",
+                show_in.parent_type.as_ref().unwrap()
+            )));
+        }
+        let parent_name = show_in.parent_name.as_ref().ok_or_else(|| {
+            DataFusionError::Plan(format!("{statement_name} requires a scope name"))
+        })?;
+        let parts = parent_name
+            .0
+            .iter()
+            .map(Self::convert_object_name_part_to_string)
+            .collect::<Result<Vec<_>>>()?;
+        if parts.is_empty() || parts.len() > max_parts {
+            return Err(DataFusionError::Plan(format!(
+                "{statement_name} supports at most {max_parts} scope name part(s)"
+            )));
+        }
+        Ok(Some(parts))
+    }
+
+    fn convert_object_name_part_to_string(part: &ObjectNamePart) -> Result<String> {
+        part.as_ident()
+            .map(|ident| ident.value.clone())
+            .ok_or_else(|| {
+                DataFusionError::Plan(format!("unsupported SHOW scope name part: {part}"))
+            })
+    }
+
+    fn build_show_names_dataframe(
+        &self,
+        column_name: &str,
+        names: Vec<String>,
+        filter: Option<ShowStatementFilter>,
+    ) -> Result<DataFrame> {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            column_name,
+            DataType::Utf8,
+            false,
+        )]));
+        let batch = RecordBatch::try_new(schema, vec![Arc::new(StringArray::from(names))])
+            .map_err(|error| DataFusionError::External(Box::new(error)))?;
+        let mut dataframe = self.session_context.read_batch(batch)?;
+        if let Some(ShowStatementFilter::Like(pattern)) = filter {
+            dataframe = dataframe.filter(col(column_name).like(lit(pattern)))?;
+        }
+        dataframe.sort(vec![col(column_name).sort(true, false)])
     }
 
     fn escape_sql_string(value: &str) -> String {
@@ -626,16 +732,113 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_show_tables_like_execution() -> Result<()> {
+    async fn test_show_schemas_from_catalog_like_execution() -> Result<()> {
         let session = ExtendedSessionContext::default();
         let batches = session
-            .sql("show tables like '%table%'")
+            .sql("show schemas from internal like 'information_schem_'")
             .await?
             .collect()
             .await?;
         let output = pretty_format_batches(&batches)?.to_string();
-        assert_contains!(output.as_str(), "tables");
+
+        assert_contains!(output.as_str(), "information_schema");
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_tables_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let batches = session
+            .sql("show tables like '%variable%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+        assert_contains!(output.as_str(), "variables");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_tables_from_schema_execution() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let batches = session
+            .sql("show tables from information_schema")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "variables");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_tables_from_catalog_schema_like_execution() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let batches = session
+            .sql("show tables from internal.information_schema like '%variable%'")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "variables");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_tables_from_internal_information_schema_no_catalog_virtual_tables()
+    -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let batches = session
+            .sql("show tables from internal.information_schema")
+            .await?
+            .collect()
+            .await?;
+        let output = pretty_format_batches(&batches)?.to_string();
+
+        assert_contains!(output.as_str(), "variables");
+        assert!(!output.contains("catalogs"));
+        assert!(!output.contains("schemas"));
+        assert!(!output.contains("tables"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_internal_information_schema_variables_execution() -> Result<()> {
+        let session = ExtendedSessionContext::default();
+        let batches = session
+            .sql("select name, value from internal.information_schema.variables limit 1")
+            .await?
+            .collect()
+            .await?;
+
+        assert_eq!(batches[0].schema().field(0).name(), "name");
+        assert_eq!(batches[0].schema().field(1).name(), "value");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_show_scope_errors() {
+        let session = ExtendedSessionContext::default();
+
+        let error = session
+            .sql("show schemas from missing_catalog")
+            .await
+            .unwrap_err();
+        assert_contains!(error.to_string(), "unknown catalog missing_catalog");
+
+        let error = session
+            .sql("show tables from missing_schema")
+            .await
+            .unwrap_err();
+        assert_contains!(error.to_string(), "schema missing_schema not exist");
+
+        let error = session
+            .sql("show tables from internal.information_schema.extra")
+            .await
+            .unwrap_err();
+        assert_contains!(error.to_string(), "supports at most 2 scope name part(s)");
     }
 
     #[test]
@@ -732,10 +935,9 @@ mod tests {
     #[test]
     fn test_show_like_sql_escapes_quotes() -> Result<()> {
         let session = ExtendedSessionContext::default();
-        let sql = session.build_filtered_virtual_table_sql(
-            INFORMATION_SCHEMA_SHOW_CATALOGS,
-            "catalog_name",
+        let sql = session.build_show_variables_sql(
             &Some(ShowStatementFilter::Like("%o''hara%".to_string())),
+            false,
         )?;
 
         assert_contains!(sql.as_str(), "LIKE '%o''''hara%'");

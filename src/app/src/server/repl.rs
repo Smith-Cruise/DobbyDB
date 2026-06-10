@@ -12,6 +12,23 @@ use std::fs;
 use std::time::Instant;
 use tokio::signal;
 
+const DOBBYDB_BANNER: &str = concat!(
+    "\x1b[1;38;5;46m██████╗  ██████╗ ██████╗ ██████╗ ██╗   ██╗██████╗ ██████╗ \n",
+    "\x1b[38;5;40m██╔══██╗██╔═══██╗██╔══██╗██╔══██╗╚██╗ ██╔╝██╔══██╗██╔══██╗\n",
+    "\x1b[38;5;34m██║  ██║██║   ██║██████╔╝██████╔╝ ╚████╔╝ ██║  ██║██████╔╝\n",
+    "\x1b[38;5;28m██║  ██║██║   ██║██╔══██╗██╔══██╗  ╚██╔╝  ██║  ██║██╔══██╗\n",
+    "\x1b[38;5;34m██████╔╝╚██████╔╝██████╔╝██████╔╝   ██║   ██████╔╝██████╔╝\n",
+    "\x1b[38;5;40m╚═════╝  ╚═════╝ ╚═════╝ ╚═════╝    ╚═╝   ╚═════╝ ╚═════╝ \n",
+    "\x1b[48;5;16;1;38;5;46m              WAKE UP, QUERY THE DATA LAKE              \x1b[0m"
+);
+
+fn print_banner() {
+    println!("{DOBBYDB_BANNER}");
+    println!(
+        "\x1b[38;5;40m[ CONNECTED ]\x1b[0m Enter SQL ending with ';'. Type 'quit;' to disconnect.\n"
+    );
+}
+
 /// run and execute SQL statements and commands against a context with the given print options
 pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintOptions) {
     let mut rl = Editor::new().expect("created editor");
@@ -22,8 +39,7 @@ pub async fn exec_from_repl(ctx: &ExtendedSessionContext, print_options: &PrintO
 
     let mut sql_buffer = String::new();
 
-    println!("DobbyDB SQL CLI - Enter your SQL commands (end with ;)");
-    println!("Type 'quit;' to exit\n");
+    print_banner();
 
     loop {
         // 根据是否有未完成的语句选择提示符

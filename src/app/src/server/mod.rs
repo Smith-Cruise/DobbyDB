@@ -104,8 +104,12 @@ Useful SQL:
   show catalogs;
   show catalogs like '%prod%';
   show schemas;
+  show schemas from <catalog_name>;
+  show schemas from <catalog_name> like '%default%';
   show schemas like '%default%';
   show tables;
+  show tables from <schema_name>;
+  show tables from <catalog_name>.<schema_name> like '%events%';
   show tables like '%events%';
   show variables;
   show variables verbose;
