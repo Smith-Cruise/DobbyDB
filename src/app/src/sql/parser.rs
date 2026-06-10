@@ -286,7 +286,7 @@ mod tests {
     use crate::statements::{ShowCatalogsStatement, ShowVariablesStatement};
     use sqlparser::ast::{
         Ident, ObjectName, ObjectNamePart, ShowStatementFilter, ShowStatementFilterPosition,
-        ShowStatementOptions, Statement, Use,
+        ShowStatementInClause, ShowStatementOptions, Statement, Use,
     };
 
     #[test]
@@ -367,6 +367,31 @@ mod tests {
     }
 
     #[test]
+    fn test_show_schemas_from_catalog_like() -> Result<()> {
+        let statements = ExtendedParser::parse_sql("show schemas from internal like '%schema%'")?;
+        let SQLStatement(statement) = &statements[0] else {
+            panic!("expected SQL statement");
+        };
+        let Statement::ShowSchemas { show_options, .. } = statement.as_ref() else {
+            panic!("expected SHOW SCHEMAS statement");
+        };
+        let show_in = show_options.show_in.as_ref().expect("expected FROM scope");
+
+        assert_eq!(show_in.clause, ShowStatementInClause::FROM);
+        assert_eq!(
+            show_in.parent_name.as_ref().unwrap().to_string(),
+            "internal"
+        );
+        assert_eq!(
+            show_options.filter_position,
+            Some(ShowStatementFilterPosition::Suffix(
+                ShowStatementFilter::Like("%schema%".to_string())
+            ))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_show_tables_like() -> Result<()> {
         let statement = ExtendedParser::parse_sql("show tables like '%foo%'")?;
         let stmt = &statement[0];
@@ -387,6 +412,62 @@ mod tests {
             },
         }));
         assert_eq!(expected_statement, *stmt);
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_tables_from_schema() -> Result<()> {
+        let statements = ExtendedParser::parse_sql("show tables from information_schema")?;
+        let SQLStatement(statement) = &statements[0] else {
+            panic!("expected SQL statement");
+        };
+        let Statement::ShowTables { show_options, .. } = statement.as_ref() else {
+            panic!("expected SHOW TABLES statement");
+        };
+
+        assert_eq!(
+            show_options
+                .show_in
+                .as_ref()
+                .unwrap()
+                .parent_name
+                .as_ref()
+                .unwrap()
+                .to_string(),
+            "information_schema"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_show_tables_from_catalog_schema_like() -> Result<()> {
+        let statements = ExtendedParser::parse_sql(
+            "show tables from internal.information_schema like '%table%'",
+        )?;
+        let SQLStatement(statement) = &statements[0] else {
+            panic!("expected SQL statement");
+        };
+        let Statement::ShowTables { show_options, .. } = statement.as_ref() else {
+            panic!("expected SHOW TABLES statement");
+        };
+
+        assert_eq!(
+            show_options
+                .show_in
+                .as_ref()
+                .unwrap()
+                .parent_name
+                .as_ref()
+                .unwrap()
+                .to_string(),
+            "internal.information_schema"
+        );
+        assert_eq!(
+            show_options.filter_position,
+            Some(ShowStatementFilterPosition::Suffix(
+                ShowStatementFilter::Like("%table%".to_string())
+            ))
+        );
         Ok(())
     }
 
