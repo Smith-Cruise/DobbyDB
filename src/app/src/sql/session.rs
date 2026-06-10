@@ -832,7 +832,7 @@ mod tests {
             .sql("show tables from missing_schema")
             .await
             .unwrap_err();
-        assert_contains!(error.to_string(), "unknown schema internal.missing_schema");
+        assert_contains!(error.to_string(), "schema missing_schema not exist");
 
         let error = session
             .sql("show tables from internal.information_schema.extra")

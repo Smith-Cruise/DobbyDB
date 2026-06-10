@@ -45,7 +45,7 @@ impl DobbyDbCatalogProvider for InternalCatalog {
     async fn list_table_names(&self, schema_name: &str) -> Result<Vec<String>> {
         if schema_name != INFORMATION_SCHEMA {
             return Err(DataFusionError::Plan(format!(
-                "{} schema not exist",
+                "schema {} not exist",
                 schema_name
             )));
         }
