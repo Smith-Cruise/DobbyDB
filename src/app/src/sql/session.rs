@@ -287,16 +287,6 @@ impl ExtendedSessionContext {
         let catalog_name = Self::resolve_show_scope(show_options, "SHOW SCHEMAS", 1)?
             .map_or_else(|| default_catalog, |parts| parts[0].clone());
 
-        if !self
-            .dobbydb_context
-            .catalog_manager
-            .catalog_exists(&catalog_name)
-        {
-            return Err(DataFusionError::Plan(format!(
-                "unknown catalog {catalog_name}"
-            )));
-        }
-
         let schema_names = self
             .dobbydb_context
             .catalog_manager
@@ -320,26 +310,6 @@ impl ExtendedSessionContext {
                 Some(parts) if parts.len() == 1 => (default_catalog, parts[0].clone()),
                 Some(parts) => (parts[0].clone(), parts[1].clone()),
             };
-
-        if !self
-            .dobbydb_context
-            .catalog_manager
-            .catalog_exists(&catalog_name)
-        {
-            return Err(DataFusionError::Plan(format!(
-                "unknown catalog {catalog_name}"
-            )));
-        }
-        if !self
-            .dobbydb_context
-            .catalog_manager
-            .schema_exist(&catalog_name, &schema_name)
-            .await?
-        {
-            return Err(DataFusionError::Plan(format!(
-                "unknown schema {catalog_name}.{schema_name}"
-            )));
-        }
 
         let table_names = self
             .dobbydb_context
