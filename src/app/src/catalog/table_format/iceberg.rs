@@ -1,3 +1,4 @@
+use crate::catalog::table_format::iceberg::iceberg_hdfs_file_io::HdfsStorageFactory;
 use crate::table_format::iceberg::iceberg_metadata_table_provider::IcebergMetadataTableProvider;
 use crate::table_format::iceberg::iceberg_table_provider::IcebergTableProvider;
 use crate::table_format::metadata_table::MetadataTableType;
@@ -5,7 +6,7 @@ use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
 use datafusion::sql::TableReference;
-use dobbydb_storage::storage::{OSS_SCHEMA, S3_SCHEMA, S3A_SCHEMA, Storage};
+use dobbydb_storage::storage::{HDFS_SCHEMA, OSS_SCHEMA, S3_SCHEMA, S3A_SCHEMA, Storage};
 use iceberg::io::{FileIO, FileIOBuilder, LocalFsStorageFactory};
 use iceberg::table::StaticTable;
 use iceberg::{NamespaceIdent, TableIdent};
@@ -14,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
+mod iceberg_hdfs_file_io;
 mod iceberg_metadata_scan;
 pub mod iceberg_metadata_table_provider;
 mod iceberg_table_provider;
@@ -85,6 +87,10 @@ fn build_file_io(
             customized_credential_load: None,
         })),
         OSS_SCHEMA => FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Oss)),
+        HDFS_SCHEMA => FileIOBuilder::new(Arc::new(
+            HdfsStorageFactory::try_new(metadata_location)
+                .map_err(|error| DataFusionError::External(Box::new(error)))?,
+        )),
         _ => {
             return Err(DataFusionError::NotImplemented(format!(
                 "unsupported iceberg storage scheme: {scheme}"

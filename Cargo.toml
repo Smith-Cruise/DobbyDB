@@ -17,9 +17,11 @@ sqlparser = "0.61.0"
 tokio = { version = "1.0", features = ["rt-multi-thread", "tracing", "rt"] }
 console-subscriber = "0.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
+typetag = "0.2"
 toml = "0.9.5"
 futures = "0.3.31"
 async-trait = "0.1.88"
+bytes = "1"
 url = "2.5.7"
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "fda82a249461f8ecf09b6328f6db7272e238844a" }
