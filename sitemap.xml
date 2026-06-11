@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/catalog/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/getting-started/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/server/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/storage/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+    <url>
+         <loc>https://smith-cruise.github.io/dobbydb/table-format/</loc>
+         <lastmod>2026-06-11</lastmod>
+    </url>
+</urlset>
