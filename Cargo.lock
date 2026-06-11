@@ -2781,6 +2781,7 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-sdk-glue",
+ "bytes",
  "clap",
  "datafusion",
  "datafusion-cli",
@@ -2789,6 +2790,7 @@ dependencies = [
  "dobbydb-common",
  "dobbydb-storage",
  "futures",
+ "hdfs-native-object-store",
  "hive_metastore",
  "iceberg",
  "iceberg-datafusion",
@@ -2799,6 +2801,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+ "typetag",
  "url",
  "volo-thrift",
 ]
