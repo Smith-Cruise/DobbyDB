@@ -29,6 +29,8 @@ iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", 
 deltalake = { version = "0.32.2", features = ["datafusion", "s3"] }
 deltalake-aws = "0.15.0"
 hdfs-native-object-store = "0.16"
+paimon = { version = "=0.2.0", features = ["storage-s3", "storage-oss", "storage-hdfs"] }
+paimon-datafusion = "=0.2.0"
 dobbydb-app = { path = "src/app" }
 dobbydb-storage = {path = "src/storage"}
 dobbydb-common = {path = "src/common"}

@@ -38,6 +38,41 @@ pub struct Storage {
 }
 
 impl Storage {
+    pub fn build_paimon_file_io_properties(&self) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        if let Some(s3_storage) = &self.s3_storage {
+            if let Some(region) = &s3_storage.region {
+                map.insert("s3.region".to_string(), region.clone());
+            }
+            if let Some(endpoint) = &s3_storage.endpoint {
+                map.insert("s3.endpoint".to_string(), endpoint.clone());
+            }
+            if let Some(access_key) = &s3_storage.access_key {
+                map.insert("s3.access-key".to_string(), access_key.clone());
+            }
+            if let Some(secret_key) = &s3_storage.secret_key {
+                map.insert("s3.secret-key".to_string(), secret_key.clone());
+            }
+            map.insert(
+                "s3.path-style-access".to_string(),
+                s3_storage.path_style_access.to_string(),
+            );
+        }
+
+        if let Some(oss_storage) = &self.oss_storage {
+            if let Some(endpoint) = &oss_storage.endpoint {
+                map.insert("fs.oss.endpoint".to_string(), endpoint.clone());
+            }
+            if let Some(access_key) = &oss_storage.access_key {
+                map.insert("fs.oss.accessKeyId".to_string(), access_key.clone());
+            }
+            if let Some(secret_key) = &oss_storage.secret_key {
+                map.insert("fs.oss.accessKeySecret".to_string(), secret_key.clone());
+            }
+        }
+        map
+    }
+
     pub fn build_iceberg_file_io_properties(&self) -> HashMap<String, String> {
         let mut map: HashMap<String, String> = HashMap::new();
         if let Some(s3_storage) = &self.s3_storage {
@@ -232,6 +267,26 @@ mod tests {
             properties.get(S3_PATH_STYLE_ACCESS).map(String::as_str),
             Some("false")
         );
+    }
+
+    #[test]
+    fn test_build_paimon_file_io_properties() {
+        let text = r#"
+            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
+            oss-storage = { endpoint = "https://oss.example.com", access-key = "oss-ak", secret-key = "oss-sk" }
+        "#;
+
+        let storage: Storage = toml::from_str(text).unwrap();
+        let properties = storage.build_paimon_file_io_properties();
+
+        assert_eq!(properties["s3.endpoint"], "http://127.0.0.1:9000");
+        assert_eq!(properties["s3.region"], "us-east-1");
+        assert_eq!(properties["s3.access-key"], "admin");
+        assert_eq!(properties["s3.secret-key"], "password");
+        assert_eq!(properties["s3.path-style-access"], "true");
+        assert_eq!(properties["fs.oss.endpoint"], "https://oss.example.com");
+        assert_eq!(properties["fs.oss.accessKeyId"], "oss-ak");
+        assert_eq!(properties["fs.oss.accessKeySecret"], "oss-sk");
     }
 
     #[test]

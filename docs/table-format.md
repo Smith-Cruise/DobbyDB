@@ -90,3 +90,23 @@ SELECT * FROM `table_name$manifests`;
 Delta Lake integration exists in the source tree, and tables are detected when
 `spark.sql.sources.provider` is exactly `DELTA`. However, Delta Lake is not yet
 perfectly supported and should be treated as incomplete.
+
+## Paimon
+
+An HMS or Glue table is treated as Paimon when its storage descriptor input
+format is exactly:
+
+```text
+org.apache.paimon.hive.mapred.PaimonInputFormat
+```
+
+DobbyDB loads the latest Paimon schema from the table location and uses
+`paimon-rust` for DataFusion scans. Column projection and filter pushdown are
+provided by the upstream Paimon DataFusion integration.
+
+Paimon tables are currently read-only. Inserts, overwrites, DDL, time travel,
+and Paimon system tables such as `$snapshots` are not supported.
+
+Supported storage schemes are `s3://`, `s3a://`, `oss://`, and `hdfs://`.
+S3/S3A and OSS reuse the storage credentials configured on the containing HMS
+or Glue catalog. HDFS obtains the NameNode authority from the table location.

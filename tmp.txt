@@ -1,0 +1,150 @@
+DobbyDB Paimon integration conversation handoff
+================================================
+
+Repository
+----------
+- Path: /Users/smith/Code/DobbyDB
+- Project: DobbyDB, a DataFusion-based data lake query engine.
+- Supported catalogs before this change: HMS and Glue.
+- Existing table formats before this change: Hive, Iceberg, Delta Lake.
+- Project instructions:
+  - Match response language to the user's question.
+  - Code comments, commit messages, and PR text must be in English.
+  - Update docs when configuration changes.
+  - Before a PR, run:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo test --all-targets --all-features --verbose
+
+Original request
+----------------
+Integrate paimon-rust and support the Apache Paimon table format.
+
+Decisions made
+--------------
+- Scope is read-only querying of Paimon tables registered in existing HMS or
+  Glue catalogs.
+- Do not add a standalone Paimon catalog.
+- Do not support INSERT, INSERT OVERWRITE, DDL, time travel, or Paimon system
+  tables in this change.
+- Supported storage schemes: s3://, s3a://, oss://, and hdfs://.
+- Use crates.io versions:
+  - paimon = 0.2.0
+  - paimon-datafusion = 0.2.0
+- Paimon implementation belongs under:
+  src/app/src/catalog/table_format/paimon/
+- Detect Paimon tables only by an exact StorageDescriptor InputFormat match:
+  org.apache.paimon.hive.mapred.PaimonInputFormat
+- OutputFormat must not be used for detection.
+- Paimon table location is read from StorageDescriptor.location, not table
+  properties.
+
+Why StorageDescriptor.location is used
+--------------------------------------
+- HMS/Glue table parameters are exposed as table_properties, but the standard
+  physical table path is a structured field in StorageDescriptor.location.
+- Table properties do not reliably contain a "location" key.
+- Some non-physical objects, such as views, can lack a storage descriptor or
+  location. A detected Paimon physical table requires a location because its
+  schema, snapshots, manifests, and data are loaded from that table root.
+- Managed and external Paimon tables are both handled by using the location
+  supplied by the metastore.
+
+Implemented changes
+-------------------
+- Added fixed paimon and paimon-datafusion dependencies.
+- Added TableFormat::Paimon and SQL rendering as USING PAIMON.
+- Added:
+  src/app/src/catalog/table_format/paimon/mod.rs
+  src/app/src/catalog/table_format/paimon/paimon_table_provider.rs
+- The Paimon factory:
+  - validates the storage scheme;
+  - converts DobbyDB storage settings to Paimon FileIO properties;
+  - builds FileIO directly from the metastore table location;
+  - loads the latest schema with paimon::table::SchemaManager;
+  - constructs paimon::Table;
+  - creates paimon_datafusion::PaimonTableProvider.
+- The DobbyDB provider wrapper:
+  - delegates schema, scan, and filter pushdown;
+  - intentionally does not delegate insert_into, keeping the integration
+    read-only;
+  - supplies a SHOW CREATE TABLE definition.
+- HMS and Glue now extract StorageDescriptor input format and location before
+  table format deduction.
+- Paimon metadata-table suffixes such as $snapshots return NotImplemented.
+- Added Storage::build_paimon_file_io_properties:
+  - S3/S3A: region, endpoint, access key, secret key, path-style access.
+  - OSS: endpoint, access key, secret key.
+  - HDFS: NameNode authority is inferred by paimon-rust from the table URL.
+- Updated docs/table-format.md.
+- Added tests for:
+  - InputFormat-based detection;
+  - ensuring a Paimon OutputFormat string alone does not trigger detection;
+  - Paimon storage option conversion;
+  - SHOW CREATE TABLE output using PAIMON.
+
+Important implementation detail
+-------------------------------
+The implementation intentionally does not use paimon::FileSystemCatalog to
+derive a warehouse/table path. HMS/Glue can contain external Paimon tables at
+arbitrary locations. The provider therefore builds FileIO from the exact
+StorageDescriptor.location, loads the latest schema from that table root, and
+constructs paimon::Table directly.
+
+Real environment validation
+---------------------------
+- Config path:
+  /Users/smith/Software/dobbydb-config/config.yaml
+- Despite its .yaml suffix, the file contains TOML and is parsed by the
+  existing TOML configuration loader.
+- Secrets from that file are intentionally omitted from this handoff.
+- Validation catalog/table:
+  qa_hms_catalog.test_db.paimon_append_basic
+- Baseline before implementation failed with:
+  unsupported Hive input format:
+  org.apache.paimon.hive.mapred.PaimonInputFormat
+- Final validation command:
+  cargo run -- --config /Users/smith/Software/dobbydb-config/config.yaml \
+    --command "select * from qa_hms_catalog.test_db.paimon_append_basic"
+- Final result: success, 5 rows returned with columns id, name, score, tag.
+
+Verification completed
+----------------------
+- cargo fmt --all -- --check: passed
+- cargo clippy --all-targets --all-features -- -D warnings: passed
+- cargo test --all-targets --all-features --verbose: passed
+  - dobbydb-app: 86 tests passed
+  - dobbydb-storage: 5 tests passed
+- Final real HMS query: passed and returned 5 rows.
+- cargo test emitted a non-fatal warning that Cargo could not update its global
+  cache last-use database because it was read-only. Tests still passed.
+
+Current worktree notes
+----------------------
+- The Paimon changes have not been committed.
+- At the time this handoff was written, the worktree contained a mixture of
+  staged and unstaged changes. Do not reset or discard either category.
+- Changed paths include:
+  Cargo.lock
+  Cargo.toml
+  docs/table-format.md
+  src/app/Cargo.toml
+  src/app/src/catalog/glue.rs
+  src/app/src/catalog/hms.rs
+  src/app/src/catalog/table_definition_build.rs
+  src/app/src/catalog/table_format/mod.rs
+  src/app/src/catalog/table_format/table_provider_factory.rs
+  src/app/src/catalog/table_format/paimon/
+  src/storage/src/storage.rs
+- tmp.txt is this handoff file and was added after the implementation.
+
+Useful continuation commands
+----------------------------
+git status --short
+git diff
+git diff --cached
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features --verbose
+cargo run -- --config /Users/smith/Software/dobbydb-config/config.yaml \
+  --command "select * from qa_hms_catalog.test_db.paimon_append_basic"

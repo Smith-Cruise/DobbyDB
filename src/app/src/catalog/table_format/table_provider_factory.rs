@@ -7,6 +7,7 @@ use crate::table_format::hive::hive_partition::HivePartition;
 use crate::table_format::hive::hive_storage_info::HiveStorageInfo;
 use crate::table_format::iceberg::IcebergTableProviderFactory;
 use crate::table_format::metadata_table::MetadataTableType;
+use crate::table_format::paimon::{PAIMON_INPUT_FORMAT, PaimonTableProviderFactory};
 use datafusion::catalog::TableProvider;
 use datafusion::common::Result;
 use datafusion::error::DataFusionError;
@@ -24,6 +25,7 @@ pub struct TableProviderBuilder {
     hive_storage_info: Option<HiveStorageInfo>,
     hive_partitions: Option<Vec<HivePartition>>,
     storage: Option<Storage>,
+    table_location: Option<String>,
 }
 
 impl TableProviderBuilder {
@@ -50,6 +52,7 @@ impl TableProviderBuilder {
             hive_storage_info: None,
             hive_partitions: None,
             storage,
+            table_location: None,
         }
     }
 
@@ -68,6 +71,11 @@ impl TableProviderBuilder {
 
     pub fn with_hive_partitions(mut self, hive_partitions: Option<Vec<HivePartition>>) -> Self {
         self.hive_partitions = hive_partitions;
+        self
+    }
+
+    pub fn with_table_location(mut self, table_location: Option<String>) -> Self {
+        self.table_location = table_location;
         self
     }
 
@@ -134,6 +142,22 @@ impl TableProviderBuilder {
                     "hive_storage_info or hive_partitions not existed".into(),
                 )),
             },
+            TableFormat::Paimon => {
+                if self.metadata_table_type.is_some() {
+                    return Err(DataFusionError::NotImplemented(
+                        "Paimon metadata tables are not supported".to_string(),
+                    ));
+                }
+                let table_location = self.table_location.ok_or_else(|| {
+                    DataFusionError::Internal("Paimon table location not existed".to_string())
+                })?;
+                PaimonTableProviderFactory::try_create_table_provider(
+                    self.table_reference,
+                    table_location,
+                    self.storage,
+                )
+                .await
+            }
         }
     }
 }
@@ -156,7 +180,13 @@ pub fn parse_table_reference(tbl_name: &str) -> Result<(String, Option<MetadataT
     Ok((table_name.to_string(), metadata_table_type))
 }
 
-pub fn deduce_table_format(table_properties: &HashMap<String, String>) -> Result<TableFormat> {
+pub fn deduce_table_format(
+    table_properties: &HashMap<String, String>,
+    input_format: Option<&str>,
+) -> Result<TableFormat> {
+    if input_format == Some(PAIMON_INPUT_FORMAT) {
+        return Ok(TableFormat::Paimon);
+    }
     if table_properties.contains_key("metadata_location") {
         return Ok(TableFormat::Iceberg);
     }
@@ -210,7 +240,7 @@ mod tests {
             HashMap::from([("metadata_location".to_string(), "path".to_string())]);
         assert_eq!(
             TableFormat::Iceberg,
-            deduce_table_format(&table_properties).unwrap()
+            deduce_table_format(&table_properties, None).unwrap()
         );
         let table_properties = HashMap::from([(
             "spark.sql.sources.provider".to_string(),
@@ -218,12 +248,26 @@ mod tests {
         )]);
         assert_eq!(
             TableFormat::Delta,
-            deduce_table_format(&table_properties).unwrap()
+            deduce_table_format(&table_properties, None).unwrap()
         );
         let table_properties = HashMap::from([]);
         assert_eq!(
             TableFormat::Hive,
-            deduce_table_format(&table_properties).unwrap()
+            deduce_table_format(&table_properties, None).unwrap()
+        );
+
+        let table_properties = HashMap::new();
+        assert_eq!(
+            TableFormat::Paimon,
+            deduce_table_format(&table_properties, Some(PAIMON_INPUT_FORMAT)).unwrap()
+        );
+        assert_eq!(
+            TableFormat::Hive,
+            deduce_table_format(
+                &table_properties,
+                Some("org.apache.paimon.hive.mapred.PaimonOutputFormat")
+            )
+            .unwrap()
         );
     }
 

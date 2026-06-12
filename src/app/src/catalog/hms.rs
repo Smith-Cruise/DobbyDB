@@ -203,7 +203,17 @@ impl AsyncSchemaProvider for HMSSchema {
             }
         }
 
-        let table_format = deduce_table_format(&hms_table_properties)?;
+        let storage_descriptor = hms_table.sd.as_ref().ok_or_else(|| {
+            DataFusionError::Internal("Storage descriptor not existed".to_string())
+        })?;
+        let table_location = storage_descriptor
+            .location
+            .as_ref()
+            .map(ToString::to_string);
+        let table_format = deduce_table_format(
+            &hms_table_properties,
+            storage_descriptor.input_format.as_deref(),
+        )?;
         let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
             let hive_storage_info = HiveStorageInfo::try_new_from_hms_table(&hms_table)?;
             let hive_partitions = if !hive_storage_info
@@ -242,7 +252,8 @@ impl AsyncSchemaProvider for HMSSchema {
         let table_provider_builder = table_provider_builder
             .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
-            .with_hive_partitions(hive_partitions);
+            .with_hive_partitions(hive_partitions)
+            .with_table_location(table_location);
         Ok(Some(table_provider_builder.build().await?))
     }
 }

@@ -22,6 +22,8 @@ iceberg = { workspace = true }
 iceberg-datafusion = { workspace = true }
 iceberg-storage-opendal = { workspace = true }
 hdfs-native-object-store = { workspace = true }
+paimon = { workspace = true }
+paimon-datafusion = { workspace = true }
 deltalake = { workspace = true }
 deltalake-aws = { workspace = true }
 volo-thrift = "0.10.8"

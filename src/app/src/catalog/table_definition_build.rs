@@ -81,6 +81,7 @@ fn table_format_sql(table_format: TableFormat) -> &'static str {
         TableFormat::Hive => "HIVE",
         TableFormat::Iceberg => "ICEBERG",
         TableFormat::Delta => "DELTA",
+        TableFormat::Paimon => "PAIMON",
     }
 }
 
@@ -273,6 +274,29 @@ mod tests {
         assert_eq!(
             definition,
             "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64,\n  `dt` Utf8\n)\nPARTITIONED BY (`dt`)\nUSING DELTA\nLOCATION 's3://bucket/path'"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_paimon_definition_with_partitions() -> Result<()> {
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("dt", DataType::Utf8, true),
+        ]);
+
+        let definition = TableDefinitionBuilder::new(
+            TableFormat::Paimon,
+            TableReference::full("catalog", "schema", "table"),
+            schema,
+            "hdfs://namenode:8020/warehouse/schema.db/table",
+        )
+        .with_partition_column_names(vec!["dt".to_string()])
+        .build()?;
+
+        assert_eq!(
+            definition,
+            "CREATE TABLE `catalog`.`schema`.`table`\n(\n  `id` Int64,\n  `dt` Utf8\n)\nPARTITIONED BY (`dt`)\nUSING PAIMON\nLOCATION 'hdfs://namenode:8020/warehouse/schema.db/table'"
         );
         Ok(())
     }
