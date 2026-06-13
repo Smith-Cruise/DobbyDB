@@ -137,7 +137,10 @@ impl AsyncSchemaProvider for GlueSchema {
         let storage_descriptor = glue_table.storage_descriptor.as_ref().ok_or_else(|| {
             DataFusionError::Internal("Storage descriptor not existed".to_string())
         })?;
-        let table_location = storage_descriptor.location().map(ToString::to_string);
+        let table_location = storage_descriptor
+            .location()
+            .map(ToString::to_string)
+            .ok_or_else(|| DataFusionError::Internal("location not existed".to_string()))?;
         let table_format =
             deduce_table_format(&glue_table_properties, storage_descriptor.input_format())?;
         let (hive_storage_info, hive_partitions) = if table_format == TableFormat::Hive {
@@ -176,6 +179,7 @@ impl AsyncSchemaProvider for GlueSchema {
 
         let table_provider_builder = TableProviderBuilder::new(
             self.dobbydb_context.clone(),
+            table_location,
             table_reference,
             glue_table_properties,
             table_format,
@@ -184,8 +188,7 @@ impl AsyncSchemaProvider for GlueSchema {
         let table_provider_builder = table_provider_builder
             .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
-            .with_hive_partitions(hive_partitions)
-            .with_table_location(table_location);
+            .with_hive_partitions(hive_partitions);
 
         Ok(Some(table_provider_builder.build().await?))
     }

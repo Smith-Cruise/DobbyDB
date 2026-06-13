@@ -15,7 +15,6 @@ pub enum HiveInputFormat {
 
 #[derive(Debug, Clone)]
 pub struct HiveStorageInfo {
-    pub table_location: String,
     pub input_format: HiveInputFormat,
     pub table_schema: TableSchema,
     pub serde_properties: HashMap<String, String>,
@@ -50,7 +49,6 @@ impl HiveStorageInfo {
             .unwrap_or_default();
 
         Self::try_new(
-            sd.location.as_deref(),
             sd.input_format.as_deref(),
             data_cols,
             table_partition_cols,
@@ -74,7 +72,6 @@ impl HiveStorageInfo {
             table.parameters.as_ref().cloned().unwrap_or_default();
 
         Self::try_new(
-            sd.location(),
             sd.input_format(),
             data_cols,
             table_partition_cols,
@@ -99,16 +96,12 @@ impl HiveStorageInfo {
     }
 
     fn try_new(
-        table_location: Option<&str>,
         input_format: Option<&str>,
         data_cols: Vec<Arc<Field>>,
         table_partition_cols: Vec<Arc<Field>>,
         serde_properties: HashMap<String, String>,
         table_properties: HashMap<String, String>,
     ) -> Result<Self> {
-        let table_location = table_location
-            .map(ToString::to_string)
-            .ok_or_else(|| DataFusionError::Internal("location not exist".to_string()))?;
         let input_format = match input_format {
             Some(input_format) => Self::try_get_input_format(input_format)?,
             None => {
@@ -119,7 +112,6 @@ impl HiveStorageInfo {
         };
 
         Ok(Self {
-            table_location,
             input_format,
             table_schema: TableSchema::new(Arc::new(Schema::new(data_cols)), table_partition_cols),
             serde_properties,

@@ -3,7 +3,7 @@ pub(crate) mod glue;
 pub(crate) mod hms;
 pub(crate) mod internal;
 pub(crate) mod manager;
-pub(crate) mod table_definition_build;
+pub(crate) mod table_definition_builder;
 pub(crate) mod table_format;
 
 pub(crate) use internal::{INFORMATION_SCHEMA_SHOW_VARIABLES, INTERNAL_CATALOG};
@@ -11,4 +11,4 @@ pub(crate) use manager::{
     CatalogConfig, CatalogConfigs, CatalogManager, DobbyDbCatalogProvider,
     DobbyDbCatalogProviderList,
 };
-pub(crate) use table_definition_build::TableDefinitionBuilder;
+pub(crate) use table_definition_builder::TableDefinitionBuilder;

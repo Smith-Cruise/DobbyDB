@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 pub struct TableProviderBuilder {
     dobbydb_context: Arc<DobbyDbContext>,
+    table_location: String,
     table_reference: TableReference,
     table_properties: HashMap<String, String>,
     table_format: TableFormat,
@@ -25,12 +26,12 @@ pub struct TableProviderBuilder {
     hive_storage_info: Option<HiveStorageInfo>,
     hive_partitions: Option<Vec<HivePartition>>,
     storage: Option<Storage>,
-    table_location: Option<String>,
 }
 
 impl TableProviderBuilder {
     pub fn new(
         dobbydb_context: Arc<DobbyDbContext>,
+        table_location: String,
         table_reference: TableReference,
         table_properties: HashMap<String, String>,
         table_format: TableFormat,
@@ -45,6 +46,7 @@ impl TableProviderBuilder {
         };
         Self {
             dobbydb_context,
+            table_location,
             table_reference,
             table_properties,
             table_format,
@@ -52,7 +54,6 @@ impl TableProviderBuilder {
             hive_storage_info: None,
             hive_partitions: None,
             storage,
-            table_location: None,
         }
     }
 
@@ -74,11 +75,6 @@ impl TableProviderBuilder {
         self
     }
 
-    pub fn with_table_location(mut self, table_location: Option<String>) -> Self {
-        self.table_location = table_location;
-        self
-    }
-
     #[allow(dead_code)]
     pub fn table_format(&self) -> &TableFormat {
         &self.table_format
@@ -93,6 +89,7 @@ impl TableProviderBuilder {
                     )?;
                 IcebergTableProviderFactory::try_create_table_provider(
                     self.table_reference,
+                    self.table_location,
                     iceberg_metadata_location.clone(),
                     self.metadata_table_type,
                     self.storage,
@@ -100,13 +97,9 @@ impl TableProviderBuilder {
                 .await
             }
             TableFormat::Delta => {
-                let table_location = self
-                    .table_properties
-                    .get("location")
-                    .ok_or(DataFusionError::Internal("location not existed".into()))?;
                 DeltaTableProviderFactory::try_create_table_provider(
                     self.table_reference,
-                    table_location.clone(),
+                    self.table_location,
                     self.storage,
                 )
                 .await
@@ -118,7 +111,7 @@ impl TableProviderBuilder {
                         TableFormat::Hive,
                         self.table_reference.clone(),
                         storage_info.table_schema.table_schema().as_ref().clone(),
-                        storage_info.table_location.clone(),
+                        self.table_location.clone(),
                     )
                     .with_partition_column_names(
                         storage_info
@@ -130,6 +123,7 @@ impl TableProviderBuilder {
                     )
                     .build()?;
                     HiveTableProviderFactory::try_create_table_provider(
+                        self.table_location,
                         storage_info,
                         partitions,
                         self.metadata_table_type,
@@ -148,12 +142,9 @@ impl TableProviderBuilder {
                         "Paimon metadata tables are not supported".to_string(),
                     ));
                 }
-                let table_location = self.table_location.ok_or_else(|| {
-                    DataFusionError::Internal("Paimon table location not existed".to_string())
-                })?;
                 PaimonTableProviderFactory::try_create_table_provider(
                     self.table_reference,
-                    table_location,
+                    self.table_location,
                     self.storage,
                 )
                 .await
@@ -275,6 +266,7 @@ mod tests {
     async fn test_build_hive_provider_generates_table_definition() -> Result<()> {
         let provider = TableProviderBuilder::new(
             Arc::new(DobbyDbContext::default()),
+            "s3://bucket/path".to_string(),
             TableReference::full("catalog", "schema", "table"),
             HashMap::new(),
             TableFormat::Hive,
@@ -300,7 +292,6 @@ mod tests {
 
     fn test_hive_storage_info() -> HiveStorageInfo {
         HiveStorageInfo {
-            table_location: "s3://bucket/path".to_string(),
             input_format: HiveInputFormat::Parquet,
             table_schema: TableSchema::new(
                 Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)])),

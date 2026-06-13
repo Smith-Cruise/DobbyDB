@@ -209,7 +209,8 @@ impl AsyncSchemaProvider for HMSSchema {
         let table_location = storage_descriptor
             .location
             .as_ref()
-            .map(ToString::to_string);
+            .map(ToString::to_string)
+            .ok_or_else(|| DataFusionError::Internal("location not existed".to_string()))?;
         let table_format = deduce_table_format(
             &hms_table_properties,
             storage_descriptor.input_format.as_deref(),
@@ -244,6 +245,7 @@ impl AsyncSchemaProvider for HMSSchema {
 
         let table_provider_builder = TableProviderBuilder::new(
             self.dobbydb_context.clone(),
+            table_location,
             table_reference,
             hms_table_properties,
             table_format,
@@ -252,8 +254,7 @@ impl AsyncSchemaProvider for HMSSchema {
         let table_provider_builder = table_provider_builder
             .with_metadata_table_type(metadata_table_type)
             .with_hive_storage_info(hive_storage_info)
-            .with_hive_partitions(hive_partitions)
-            .with_table_location(table_location);
+            .with_hive_partitions(hive_partitions);
         Ok(Some(table_provider_builder.build().await?))
     }
 }

@@ -25,6 +25,7 @@ pub struct IcebergTableProviderFactory {}
 impl IcebergTableProviderFactory {
     pub async fn try_create_table_provider(
         table_reference: TableReference,
+        table_location: String,
         metadata_location: String,
         metadata_table_type: Option<MetadataTableType>,
         storage: Option<Storage>,
@@ -62,8 +63,12 @@ impl IcebergTableProviderFactory {
                 IcebergMetadataTableProvider::try_new(iceberg_table, metadata_table_type)?;
             Ok(Arc::new(iceberg_metadata_table_provider))
         } else {
-            let iceberg_table =
-                IcebergTableProvider::try_new_from_table(table_reference, iceberg_table).await?;
+            let iceberg_table = IcebergTableProvider::try_new_from_table(
+                table_reference,
+                table_location,
+                iceberg_table,
+            )
+            .await?;
             Ok(Arc::new(iceberg_table))
         }
     }

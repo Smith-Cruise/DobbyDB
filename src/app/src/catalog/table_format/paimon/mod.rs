@@ -42,12 +42,12 @@ impl PaimonTableProviderFactory {
         let table = Table::new(
             file_io,
             Identifier::new(database, table_name),
-            table_location,
+            table_location.clone(),
             (*schema).clone(),
             None,
         );
         let inner = PaimonTableProvider::try_new(table)?;
-        let provider = DobbyDbPaimonTableProvider::try_new(table_reference, inner)?;
+        let provider = DobbyDbPaimonTableProvider::try_new(table_reference, table_location, inner)?;
         Ok(Arc::new(provider))
     }
 }

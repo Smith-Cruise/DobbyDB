@@ -41,6 +41,7 @@ use tokio::runtime::Handle;
 
 #[derive(Debug)]
 pub struct HiveTableProvider {
+    table_location: String,
     hive_storage_info: HiveStorageInfo,
     partitions: Vec<HivePartition>,
     storage: Option<Storage>,
@@ -50,6 +51,7 @@ pub struct HiveTableProvider {
 
 impl HiveTableProvider {
     pub fn new(
+        table_location: String,
         hive_storage_info: HiveStorageInfo,
         partitions: Vec<HivePartition>,
         storage: Option<Storage>,
@@ -57,6 +59,7 @@ impl HiveTableProvider {
         table_definition: String,
     ) -> Self {
         Self {
+            table_location,
             hive_storage_info,
             partitions,
             storage,
@@ -91,26 +94,18 @@ impl TableProvider for HiveTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        try_register_storage_info_session(
-            self.storage.as_ref(),
-            &self.hive_storage_info.table_location,
-            state,
-        )?;
+        try_register_storage_info_session(self.storage.as_ref(), &self.table_location, state)?;
 
-        let (path_schema, path_bucket) =
-            parse_location_schema_authority(&self.hive_storage_info.table_location)?;
+        let (path_schema, path_bucket) = parse_location_schema_authority(&self.table_location)?;
         let store_url = ObjectStoreUrl::parse(format!("{}://{}", path_schema, path_bucket))?;
 
         let object_store = state.runtime_env().object_store(&store_url)?;
         let meta_fetch_concurrency = state.config_options().execution.meta_fetch_concurrency;
 
         let scan_file_list: Vec<PartitionedFile> = if self.partitions.is_empty() {
-            let file_object_metas = list_files_by_directories(
-                state,
-                &object_store,
-                vec![self.hive_storage_info.table_location.clone()],
-            )
-            .await?;
+            let file_object_metas =
+                list_files_by_directories(state, &object_store, vec![self.table_location.clone()])
+                    .await?;
             file_object_metas
                 .into_iter()
                 .map(PartitionedFile::from)

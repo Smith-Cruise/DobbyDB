@@ -22,6 +22,7 @@ pub struct HiveTableProviderFactory {}
 
 impl HiveTableProviderFactory {
     pub fn try_create_table_provider(
+        table_location: String,
         info: HiveStorageInfo,
         partitions: Vec<HivePartition>,
         metadata_table_type: Option<MetadataTableType>,
@@ -31,17 +32,14 @@ impl HiveTableProviderFactory {
     ) -> Result<Arc<dyn TableProvider>> {
         match metadata_table_type {
             Some(MetadataTableType::DataFiles) => {
-                let provider = HiveDataFilesMetadataTableProvider::new(
-                    info.table_location,
-                    partitions,
-                    storage,
-                );
+                let provider =
+                    HiveDataFilesMetadataTableProvider::new(table_location, partitions, storage);
                 Ok(Arc::new(provider))
             }
             Some(MetadataTableType::Partitions) => {
                 let partition_fields = info.table_schema.table_partition_cols().to_vec();
                 let provider = HivePartitionsMetadataTableProvider::new(
-                    info.table_location,
+                    table_location,
                     partition_fields,
                     partitions,
                     storage,
@@ -53,8 +51,14 @@ impl HiveTableProviderFactory {
                 metadata_table_type
             ))),
             None => {
-                let provider =
-                    HiveTableProvider::new(info, partitions, storage, io_handle, table_definition);
+                let provider = HiveTableProvider::new(
+                    table_location,
+                    info,
+                    partitions,
+                    storage,
+                    io_handle,
+                    table_definition,
+                );
                 Ok(Arc::new(provider))
             }
         }
