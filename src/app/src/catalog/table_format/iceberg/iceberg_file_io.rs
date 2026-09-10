@@ -3,10 +3,13 @@ use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use iceberg::io::{
-    FileMetadata, FileRead, FileWrite, InputFile, OutputFile, Storage, StorageConfig,
-    StorageFactory,
+    FileMetadata, FileRead, FileWrite, InputFile, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET,
+    OSS_ENDPOINT, OutputFile, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_PATH_STYLE_ACCESS, S3_REGION,
+    S3_SECRET_ACCESS_KEY, S3_SESSION_TOKEN, Storage, StorageConfig, StorageFactory,
 };
 use iceberg::{Error, ErrorKind, Result};
+use lakelet_storage::oss_storage::OSSStorage;
+use lakelet_storage::s3_storage::S3Storage;
 use lakelet_storage::storage;
 use opendal::Operator;
 use percent_encoding::percent_decode_str;
@@ -15,25 +18,84 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-/// Iceberg storage factory backed by the unified OpenDAL builder in
-/// lakelet-storage. It ignores FileIO properties entirely: credentials come
-/// from the per-catalog `Storage` config captured at construction time.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct LakeletStorageFactory {
+pub(crate) struct IcebergStorageFactory {
     storage: storage::Storage,
 }
 
-impl LakeletStorageFactory {
+impl IcebergStorageFactory {
     pub(crate) fn new(storage: storage::Storage) -> Self {
         Self { storage }
     }
 }
 
 #[typetag::serde]
-impl StorageFactory for LakeletStorageFactory {
-    fn build(&self, _config: &StorageConfig) -> Result<Arc<dyn Storage>> {
-        Ok(Arc::new(LakeletIcebergStorage::new(self.storage.clone())))
+impl StorageFactory for IcebergStorageFactory {
+    fn build(&self, config: &StorageConfig) -> Result<Arc<dyn Storage>> {
+        // Only the REST catalog puts anything in these properties, so for
+        // every other catalog this resolves to the config as given.
+        let storage = resolve_credentials(&self.storage, config);
+        Ok(Arc::new(LakeletIcebergStorage::new(storage)))
     }
+}
+
+/// Resolve each location scheme against the catalog's own storage config first,
+/// falling back to the credentials the catalog vended for this table.
+///
+/// A configured block wins outright: it is taken as a deliberate choice of
+/// credentials and endpoint, so a block naming only a region still suppresses
+/// the vended keys for that scheme. Merging the two field by field would make
+/// which endpoint a request reaches depend on the server's response.
+///
+/// A scheme counts as vended only when its key pair is complete: FileIO
+/// properties are the catalog's response merged with our own catalog
+/// properties, so they also carry the bearer token, the access-delegation
+/// header and possibly a bare `s3.region`. A non-empty property map says
+/// nothing on its own.
+fn resolve_credentials(base: &storage::Storage, config: &StorageConfig) -> storage::Storage {
+    let vended_s3 =
+        pair(config, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY).map(|(access_key, secret_key)| {
+            S3Storage {
+                region: prop(config, S3_REGION),
+                endpoint: prop(config, S3_ENDPOINT),
+                access_key: Some(access_key),
+                secret_key: Some(secret_key),
+                session_token: prop(config, S3_SESSION_TOKEN),
+                path_style_access: path_style(config),
+            }
+        });
+    let vended_oss =
+        pair(config, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET).map(|(access_key, secret_key)| {
+            OSSStorage {
+                endpoint: prop(config, OSS_ENDPOINT),
+                access_key: Some(access_key),
+                secret_key: Some(secret_key),
+                path_style_access: false,
+            }
+        });
+
+    // A scheme neither side supplies stays unset, so `build_operator` reports
+    // it as unconfigured rather than reaching for ambient credentials.
+    storage::Storage {
+        s3_storage: base.s3_storage.clone().or(vended_s3),
+        oss_storage: base.oss_storage.clone().or(vended_oss),
+    }
+}
+
+fn prop(config: &StorageConfig, key: &str) -> Option<String> {
+    config
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn pair(config: &StorageConfig, id_key: &str, secret_key: &str) -> Option<(String, String)> {
+    Some((prop(config, id_key)?, prop(config, secret_key)?))
+}
+
+fn path_style(config: &StorageConfig) -> bool {
+    prop(config, S3_PATH_STYLE_ACCESS).is_some_and(|value| value.eq_ignore_ascii_case("true"))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -334,11 +396,20 @@ mod tests {
     #[test]
     fn test_resolve_requires_storage_config() {
         let storage = LakeletIcebergStorage::new(storage::Storage::default());
-        let error = storage
-            .resolve("s3://bucket/warehouse/metadata.json")
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::DataInvalid);
-        assert!(error.to_string().contains("no storage configured"));
+        // A scheme with no block is reported as unconfigured rather than
+        // signed with whatever credentials the environment happens to hold.
+        for location in [
+            "s3://bucket/warehouse/metadata.json",
+            "s3a://bucket/warehouse/metadata.json",
+            "oss://bucket/warehouse/metadata.json",
+        ] {
+            let error = storage.resolve(location).unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::DataInvalid, "{location}");
+            assert!(
+                error.to_string().contains("no storage configured"),
+                "{location}"
+            );
+        }
     }
 
     #[test]

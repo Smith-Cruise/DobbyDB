@@ -4,7 +4,7 @@ icon: lucide/hard-drive
 
 # Storage
 
-Storage configuration is attached to an HMS or Glue catalog and supplies the
+Storage configuration is attached to catalogs and supplies the
 credentials needed to access table data.
 
 | Location scheme | Configuration |
@@ -26,6 +26,7 @@ Configure S3-compatible storage with the `s3-storage` inline table.
 | `endpoint` | String | No | AWS default | Custom endpoint for S3-compatible services such as MinIO. Must not include the bucket name. |
 | `access-key` | String | No | Credential chain | Access key. When unset, the env/profile/IMDS credential chain is used. |
 | `secret-key` | String | No | Credential chain | Secret key. |
+| `session-token` | String | No | None | Session token for temporary (STS) credentials. |
 | `path-style-access` | Boolean | No | `false` | Uses path-style requests when `true`; otherwise uses virtual-hosted-style requests. |
 
 ```toml

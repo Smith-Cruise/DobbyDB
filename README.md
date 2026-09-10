@@ -15,7 +15,7 @@ select * from default.orders limit 10;
 
 | Area | Support |
 | --- | --- |
-| Catalog | Hive Metastore, AWS Glue, Paimon filesystem |
+| Catalog | Hive Metastore, AWS Glue, Paimon filesystem, Iceberg REST |
 | Table format | Iceberg, Hive, Paimon, Delta Lake |
 | File format | Parquet, Hive TextFile |
 | Storage | S3 / S3-compatible storage, Aliyun OSS, HDFS |

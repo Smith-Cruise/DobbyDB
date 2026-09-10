@@ -1,3 +1,4 @@
+use crate::catalog::iceberg_rest::{IcebergRestCatalog, IcebergRestCatalogConfig};
 use crate::catalog::statistics::StatisticsManager;
 use crate::context::LakeletContext;
 use crate::glue_catalog::{GlueCatalog, GlueCatalogConfig};
@@ -15,6 +16,8 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct CatalogConfigs {
+    #[serde(rename = "iceberg-rest")]
+    pub iceberg_rest: Option<Vec<IcebergRestCatalogConfig>>,
     pub hms: Option<Vec<HMSCatalogConfig>>,
     pub glue: Option<Vec<GlueCatalogConfig>>,
     #[serde(rename = "paimon-fs")]
@@ -25,6 +28,7 @@ pub struct CatalogConfigs {
 #[derive(Debug, Clone)]
 pub enum CatalogConfig {
     Internal,
+    IcebergRest(IcebergRestCatalogConfig),
     HMS(HMSCatalogConfig),
     GLUE(GlueCatalogConfig),
     PaimonFS(PaimonFSCatalogConfig),
@@ -85,6 +89,11 @@ impl CatalogManager {
             }
         }
 
+        if let Some(rest_catalogs) = &catalogs.iceberg_rest {
+            for config in rest_catalogs {
+                self.add_catalog(&config.name, CatalogConfig::IcebergRest(config.clone()))?;
+            }
+        }
         Ok(())
     }
 
@@ -116,6 +125,9 @@ impl CatalogManager {
         });
 
         match catalog_config {
+            CatalogConfig::IcebergRest(config) => {
+                Ok(Box::new(IcebergRestCatalog::new(Arc::new(config.clone()))))
+            }
             CatalogConfig::Internal => Ok(Box::new(InternalCatalog::new(lakelet_context))),
             CatalogConfig::HMS(hms_catalog) => Ok(Box::new(HMSCatalog::new(
                 lakelet_context,
@@ -208,6 +220,9 @@ impl AsyncCatalogProviderList for LakeletCatalogProviderList {
         }
 
         let catalog: Arc<dyn AsyncCatalogProvider> = match catalog_config {
+            CatalogConfig::IcebergRest(config) => {
+                Arc::new(IcebergRestCatalog::new(Arc::new(config)))
+            }
             CatalogConfig::Internal => Arc::new(InternalCatalog::new(self.lakelet_context.clone())),
             CatalogConfig::HMS(hms_catalog) => Arc::new(HMSCatalog::new(
                 self.lakelet_context.clone(),
@@ -243,12 +258,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_load_paimon_fs_catalog_from_config() {
+    fn test_load_format_catalogs_from_config() {
         let configs: CatalogConfigs = toml::from_str(
             r#"
             [[paimon-fs]]
             name = "paimon_fs_1"
             warehouse = "s3://bucket/warehouse"
+
+            [[iceberg-rest]]
+            name = "iceberg_prod"
+            uri = "http://localhost:8181"
+            s3-storage = { region = "us-east-1", access-key = "ak", secret-key = "sk" }
         "#,
         )
         .unwrap();
@@ -260,6 +280,11 @@ mod tests {
             catalog_manager.get_catalog("paimon_fs_1"),
             Some(CatalogConfig::PaimonFS(_))
         ));
+        let Some(CatalogConfig::IcebergRest(rest)) = catalog_manager.get_catalog("iceberg_prod")
+        else {
+            panic!("iceberg_prod should be an Iceberg REST catalog");
+        };
+        assert!(rest.storage.s3_storage.is_some());
     }
 
     #[test]

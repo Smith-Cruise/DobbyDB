@@ -41,7 +41,7 @@ impl TableProviderBuilder {
             CatalogConfig::GLUE(glue_config) => glue_config.storage.clone(),
             CatalogConfig::HMS(hms_config) => hms_config.storage.clone(),
             CatalogConfig::PaimonFS(paimon_fs_config) => paimon_fs_config.storage.clone(),
-            CatalogConfig::Internal => {
+            CatalogConfig::Internal | CatalogConfig::IcebergRest(_) => {
                 panic!("unreachable")
             }
         };

@@ -52,9 +52,10 @@ A configuration file can contain the following top-level sections:
 | Section | Required | Description |
 | --- | --- | --- |
 | `[server]` | No | Server-wide settings. |
-| `[[catalog.hms]]` | No | A Hive Metastore catalog. Repeat the block to configure multiple HMS catalogs. |
-| `[[catalog.glue]]` | No | An AWS Glue catalog. Repeat the block to configure multiple Glue catalogs. |
-| `[[catalog.paimon-fs]]` | No | A Paimon filesystem catalog. Repeat the block to configure multiple warehouses. |
+| `[[catalog.hms]]` | No | A Hive Metastore catalog. |
+| `[[catalog.glue]]` | No | An AWS Glue catalog. |
+| `[[catalog.paimon-fs]]` | No | A Paimon filesystem catalog. |
+| `[[catalog.iceberg-rest]]` | No | An Iceberg REST catalog. |
 
 At least one external catalog is needed to
 query external tables. The built-in `internal` catalog is always available,

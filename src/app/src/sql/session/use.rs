@@ -7,6 +7,11 @@ use datafusion::logical_expr::sqlparser::ast::Use;
 
 impl ExtendedSessionContext {
     pub(super) async fn handle_use_stmt(&self, use_stmt: &Use) -> Result<DataFrame> {
+        let identifier = |part: &datafusion::logical_expr::sqlparser::ast::ObjectNamePart| {
+            part.as_ident()
+                .map(|ident| ident.value.clone())
+                .ok_or_else(|| DataFusionError::Plan("USE requires identifier names".into()))
+        };
         let (catalog_name, schema_name) = match use_stmt {
             Use::Object(object_name) => {
                 let object_name_vec = &object_name.0;
@@ -19,11 +24,11 @@ impl ExtendedSessionContext {
                             .catalog
                             .default_catalog
                             .clone(),
-                        Some(object_name_vec[0].to_string()),
+                        Some(identifier(&object_name_vec[0])?),
                     ),
                     2 => (
-                        object_name_vec[0].to_string(),
-                        Some(object_name_vec[1].to_string()),
+                        identifier(&object_name_vec[0])?,
+                        Some(identifier(&object_name_vec[1])?),
                     ),
                     _ => {
                         return Err(DataFusionError::Plan(format!(
@@ -35,7 +40,7 @@ impl ExtendedSessionContext {
             }
             Use::Catalog(catalog_name) => {
                 let object_name_vec = &catalog_name.0;
-                (object_name_vec[0].to_string(), None)
+                (identifier(&object_name_vec[0])?, None)
             }
             _ => {
                 return Err(DataFusionError::Plan(format!(

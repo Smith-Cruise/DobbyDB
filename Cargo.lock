@@ -3942,6 +3942,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceberg-catalog-rest"
+version = "0.10.0"
+source = "git+https://github.com/apache/iceberg-rust?rev=d05d56645979804c659aa265f6041d93ea0e6557#d05d56645979804c659aa265f6041d93ea0e6557"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "http 1.5.0",
+ "iceberg",
+ "itertools 0.13.0",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tokio",
+ "typed-builder 0.20.1",
+ "uuid",
+]
+
+[[package]]
 name = "iceberg-datafusion"
 version = "0.10.0"
 source = "git+https://github.com/apache/iceberg-rust?rev=d05d56645979804c659aa265f6041d93ea0e6557#d05d56645979804c659aa265f6041d93ea0e6557"
@@ -4321,6 +4340,7 @@ dependencies = [
  "futures",
  "hive_metastore",
  "iceberg",
+ "iceberg-catalog-rest",
  "iceberg-datafusion",
  "lakelet-common",
  "lakelet-storage",

@@ -29,6 +29,7 @@ url = "2.5.7"
 percent-encoding = "2.3"
 iceberg = { git = "https://github.com/apache/iceberg-rust", rev = "d05d56645979804c659aa265f6041d93ea0e6557" }
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust", rev = "d05d56645979804c659aa265f6041d93ea0e6557" }
+iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust", rev = "d05d56645979804c659aa265f6041d93ea0e6557" }
 opendal = { version = "0.58.1", features = ["services-s3", "services-oss", "services-hdfs-native"] }
 object_store_opendal = "0.58.0"
 deltalake = { git = "https://github.com/delta-io/delta.rs", rev = "84fad0b1bd861367a94e144cd253323559c9d3bd", features = ["datafusion"] }

@@ -24,9 +24,9 @@ pub const HDFS_SCHEMA: &str = "hdfs";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Storage {
     #[serde(rename = "s3-storage")]
-    s3_storage: Option<S3Storage>,
+    pub s3_storage: Option<S3Storage>,
     #[serde(rename = "oss-storage")]
-    oss_storage: Option<OSSStorage>,
+    pub oss_storage: Option<OSSStorage>,
 }
 
 impl Storage {
@@ -165,7 +165,7 @@ mod tests {
     use datafusion::prelude::SessionContext;
 
     const S3_TOML: &str = r#"
-        s3-storage = { endpoint = "http://127.0.0.1:9000", region = "cn-north-1", access-key = "ak", secret-key = "sk", path-style-access = true }
+        s3-storage = { endpoint = "http://127.0.0.1:9000", region = "cn-north-1", access-key = "ak", secret-key = "sk", session-token = "token", path-style-access = true }
     "#;
 
     const OSS_TOML: &str = r#"
@@ -247,34 +247,48 @@ mod tests {
 
     #[test]
     fn test_parse_storage() {
-        let text = r#"
-            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
-        "#;
-
-        let storages: Storage = toml::from_str(text).unwrap();
-        assert!(storages.s3_storage.is_some());
-        assert!(storages.oss_storage.is_none());
-        let s3_storage = storages.s3_storage.unwrap();
-        assert_eq!("http://127.0.0.1:9000", &s3_storage.endpoint.unwrap());
-        assert_eq!("us-east-1", &s3_storage.region.unwrap());
-        assert_eq!("admin", &s3_storage.access_key.unwrap());
-        assert_eq!("password", &s3_storage.secret_key.unwrap());
-        assert!(s3_storage.path_style_access);
-
-        let text = r#"
-            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password" }
-            oss-storage = { endpoint = "http://127.0.0.1:9000", access-key = "admin", secret-key = "password", path-style-access = false }
-        "#;
-        let storage: Storage = toml::from_str(text).unwrap();
-        assert!(storage.s3_storage.is_some());
-        assert!(storage.oss_storage.is_some());
+        // Every field of both backends.
+        let storage = parse_toml(
+            r#"
+            s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:9000", access-key = "s3-ak", secret-key = "s3-sk", session-token = "s3-token", path-style-access = true }
+            oss-storage = { endpoint = "https://oss-cn-hangzhou.aliyuncs.com", access-key = "oss-ak", secret-key = "oss-sk", path-style-access = true }
+        "#,
+        );
         let s3_storage = storage.s3_storage.unwrap();
+        assert_eq!("us-east-1", &s3_storage.region.unwrap());
+        assert_eq!("http://127.0.0.1:9000", &s3_storage.endpoint.unwrap());
+        assert_eq!("s3-ak", &s3_storage.access_key.unwrap());
+        assert_eq!("s3-sk", &s3_storage.secret_key.unwrap());
+        assert_eq!("s3-token", &s3_storage.session_token.unwrap());
+        assert!(s3_storage.path_style_access);
+        let oss_storage = storage.oss_storage.unwrap();
+        assert_eq!(
+            "https://oss-cn-hangzhou.aliyuncs.com",
+            &oss_storage.endpoint.unwrap()
+        );
+        assert_eq!("oss-ak", &oss_storage.access_key.unwrap());
+        assert_eq!("oss-sk", &oss_storage.secret_key.unwrap());
+        assert!(oss_storage.path_style_access);
+
+        // Every field is optional, and path-style-access defaults to false.
+        let storage = parse_toml("s3-storage = {}\noss-storage = {}\n");
+        let s3_storage = storage.s3_storage.unwrap();
+        assert!(s3_storage.region.is_none());
+        assert!(s3_storage.endpoint.is_none());
+        assert!(s3_storage.access_key.is_none());
+        assert!(s3_storage.secret_key.is_none());
+        assert!(s3_storage.session_token.is_none());
         assert!(!s3_storage.path_style_access);
         let oss_storage = storage.oss_storage.unwrap();
-        assert_eq!("http://127.0.0.1:9000", &oss_storage.endpoint.unwrap());
-        assert_eq!("admin", &oss_storage.access_key.unwrap());
-        assert_eq!("password", &oss_storage.secret_key.unwrap());
+        assert!(oss_storage.endpoint.is_none());
+        assert!(oss_storage.access_key.is_none());
+        assert!(oss_storage.secret_key.is_none());
         assert!(!oss_storage.path_style_access);
+
+        // A catalog carrying no storage block at all.
+        let storage = parse_toml("");
+        assert!(storage.s3_storage.is_none());
+        assert!(storage.oss_storage.is_none());
     }
 
     #[test]

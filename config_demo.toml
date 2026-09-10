@@ -68,3 +68,21 @@ metastore-uri = "127.0.0.1:9087"
 # Optional storage credentials, matched by the warehouse path scheme, same
 # keys as the HMS/Glue storage blocks above. A local warehouse needs none.
 # s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
+
+# ---------------------------------------------------------------------------
+# Iceberg REST catalogs. Repeat the [[catalog.iceberg-rest]] block for each
+# service. Read-only: queries and metadata tables, no writes.
+# ---------------------------------------------------------------------------
+# [[catalog.iceberg-rest]]
+# Required. Unique catalog name used in SQL.
+# name = "iceberg_rest"
+# Required. HTTP(S) base URL, without credentials or query parameters.
+# uri = "https://catalog.example.com"
+# Optional. Warehouse identifier, passed unchanged to the service.
+# warehouse = "warehouse_name"
+# Optional. Bearer token for authenticating requests to the REST service.
+# token = "<REST catalog access token>"
+# Optional storage credentials, used in preference to any the REST catalog
+# vends. Without a block for a location scheme, credentials vended by the
+# server serve that scheme instead.
+# s3-storage = { region = "us-east-1", access-key = "ak", secret-key = "sk" }
