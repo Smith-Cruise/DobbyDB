@@ -3,9 +3,10 @@ use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use iceberg::io::{
-    FileMetadata, FileRead, FileWrite, InputFile, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET,
-    OSS_ENDPOINT, OutputFile, S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_PATH_STYLE_ACCESS, S3_REGION,
-    S3_SECRET_ACCESS_KEY, S3_SESSION_TOKEN, Storage, StorageConfig, StorageFactory,
+    CLIENT_REGION, FileMetadata, FileRead, FileWrite, InputFile, OSS_ACCESS_KEY_ID,
+    OSS_ACCESS_KEY_SECRET, OSS_ENDPOINT, OutputFile, S3_ACCESS_KEY_ID, S3_ENDPOINT,
+    S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY, S3_SESSION_TOKEN, Storage,
+    StorageConfig, StorageFactory,
 };
 use iceberg::{Error, ErrorKind, Result};
 use lakelet_storage::oss_storage::OSSStorage;
@@ -51,13 +52,15 @@ impl StorageFactory for IcebergStorageFactory {
 /// A scheme counts as vended only when its key pair is complete: FileIO
 /// properties are the catalog's response merged with our own catalog
 /// properties, so they also carry the bearer token, the access-delegation
-/// header and possibly a bare `s3.region`. A non-empty property map says
-/// nothing on its own.
+/// header and possibly a bare `s3.region` / `client.region`. A non-empty
+/// property map says nothing on its own.
 fn resolve_credentials(base: &storage::Storage, config: &StorageConfig) -> storage::Storage {
     let vended_s3 =
         pair(config, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY).map(|(access_key, secret_key)| {
             S3Storage {
-                region: prop(config, S3_REGION),
+                // iceberg-rust gives `client.region` precedence over
+                // `s3.region`; mirror it so both vending styles work.
+                region: prop(config, CLIENT_REGION).or_else(|| prop(config, S3_REGION)),
                 endpoint: prop(config, S3_ENDPOINT),
                 access_key: Some(access_key),
                 secret_key: Some(secret_key),
@@ -417,6 +420,116 @@ mod tests {
             error.to_string().contains("Failed to build operator"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn test_resolve_credentials_priority() {
+        let config = |props: &[(&str, &str)]| {
+            StorageConfig::from_props(
+                props
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+            )
+        };
+        let vended_pair = [
+            (S3_ACCESS_KEY_ID, "vended-ak"),
+            (S3_SECRET_ACCESS_KEY, "vended-sk"),
+        ];
+
+        // A configured block wins outright, even when it names only a region.
+        let block = storage::Storage {
+            s3_storage: Some(S3Storage {
+                region: Some("eu-west-1".to_string()),
+                ..Default::default()
+            }),
+            oss_storage: None,
+        };
+        let mut props = vended_pair.to_vec();
+        props.push((S3_REGION, "us-east-1"));
+        let resolved = resolve_credentials(&block, &config(&props));
+        let s3 = resolved.s3_storage.unwrap();
+        assert_eq!(s3.region.as_deref(), Some("eu-west-1"));
+        assert!(s3.access_key.is_none());
+        assert!(s3.secret_key.is_none());
+
+        // A complete vended pair fills every field; `client.region` takes
+        // precedence over `s3.region`, as in iceberg-rust.
+        let mut props = vended_pair.to_vec();
+        props.extend([
+            (CLIENT_REGION, "ap-southeast-1"),
+            (S3_REGION, "us-east-1"),
+            (S3_ENDPOINT, "http://127.0.0.1:9000"),
+            (S3_SESSION_TOKEN, "vended-token"),
+            (S3_PATH_STYLE_ACCESS, "TRUE"),
+        ]);
+        let resolved = resolve_credentials(&storage::Storage::default(), &config(&props));
+        assert!(resolved.oss_storage.is_none());
+        let s3 = resolved.s3_storage.unwrap();
+        assert_eq!(s3.region.as_deref(), Some("ap-southeast-1"));
+        assert_eq!(s3.endpoint.as_deref(), Some("http://127.0.0.1:9000"));
+        assert_eq!(s3.access_key.as_deref(), Some("vended-ak"));
+        assert_eq!(s3.secret_key.as_deref(), Some("vended-sk"));
+        assert_eq!(s3.session_token.as_deref(), Some("vended-token"));
+        assert!(s3.path_style_access);
+
+        // Without `client.region`, `s3.region` is used.
+        let mut props = vended_pair.to_vec();
+        props.push((S3_REGION, "us-east-1"));
+        let resolved = resolve_credentials(&storage::Storage::default(), &config(&props));
+        let s3 = resolved.s3_storage.unwrap();
+        assert_eq!(s3.region.as_deref(), Some("us-east-1"));
+        assert!(s3.session_token.is_none());
+        assert!(!s3.path_style_access);
+
+        // An incomplete pair is not vended, whether the secret is missing or
+        // blank; a region alone does not count either.
+        for props in [
+            vec![
+                (S3_ACCESS_KEY_ID, "vended-ak"),
+                (S3_REGION, "us-east-1"),
+                (CLIENT_REGION, "us-east-1"),
+            ],
+            vec![
+                (S3_ACCESS_KEY_ID, "vended-ak"),
+                (S3_SECRET_ACCESS_KEY, "   "),
+            ],
+        ] {
+            let resolved = resolve_credentials(&storage::Storage::default(), &config(&props));
+            assert!(resolved.s3_storage.is_none(), "{props:?}");
+        }
+
+        // The OSS pair is resolved independently of the s3 one.
+        let resolved = resolve_credentials(
+            &storage::Storage::default(),
+            &config(&[
+                (OSS_ACCESS_KEY_ID, "oss-ak"),
+                (OSS_ACCESS_KEY_SECRET, "oss-sk"),
+                (OSS_ENDPOINT, "https://oss-cn-hangzhou.aliyuncs.com"),
+            ]),
+        );
+        assert!(resolved.s3_storage.is_none());
+        let oss = resolved.oss_storage.unwrap();
+        assert_eq!(
+            oss.endpoint.as_deref(),
+            Some("https://oss-cn-hangzhou.aliyuncs.com")
+        );
+        assert_eq!(oss.access_key.as_deref(), Some("oss-ak"));
+        assert_eq!(oss.secret_key.as_deref(), Some("oss-sk"));
+        assert!(!oss.path_style_access);
+
+        // Our own catalog properties ride along in the same map and must not
+        // be mistaken for vended credentials.
+        let resolved = resolve_credentials(
+            &storage::Storage::default(),
+            &config(&[
+                ("token", "bearer-token"),
+                ("header.X-Iceberg-Access-Delegation", "vended-credentials"),
+                (S3_REGION, "us-east-1"),
+            ]),
+        );
+        assert!(resolved.s3_storage.is_none());
+        assert!(resolved.oss_storage.is_none());
     }
 
     #[test]

@@ -55,15 +55,8 @@ impl IcebergRestCatalogConfig {
     }
 }
 
-// REST errors may include response bodies containing credentials. Keep only the
-// error kind when crossing the catalog boundary, including through upstream DF.
-fn catalog_error(error: iceberg::Error) -> iceberg::Error {
-    iceberg::Error::new(error.kind(), "Iceberg REST catalog request failed")
-        .with_retryable(error.retryable())
-}
-
 fn to_datafusion_error(error: iceberg::Error) -> DataFusionError {
-    DataFusionError::External(Box::new(catalog_error(error)))
+    DataFusionError::External(Box::new(error))
 }
 
 fn namespace_from_schema(name: &str) -> Result<NamespaceIdent> {
