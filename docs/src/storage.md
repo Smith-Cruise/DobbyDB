@@ -32,16 +32,14 @@ Configure S3-compatible storage with the `s3-storage` inline table.
 | `path-style-access` | Boolean | No | `false` | Uses path-style requests when `true`; otherwise uses virtual-hosted-style requests. |
 
 ```toml
+# Minio demo
 [[catalog.hms]]
 name = "hms"
 metastore-uri = "127.0.0.1:9083"
 s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:9000", access-key = "admin", secret-key = "password", path-style-access = true }
 ```
 
-Self-hosted S3-compatible services usually also need `path-style-access = true`,
-which has no environment fallback. Pointing `AWS_ENDPOINT_URL` at such a service
-without a block leaves addressing in virtual-hosted style, which most of them
-reject.
+Self-hosted S3-compatible services(like Minio) usually also set `path-style-access = true`.
 
 ## Aliyun OSS
 
@@ -59,10 +57,11 @@ role.
 | `path-style-access` | Boolean | No | `false` | Uses path-style requests when `true`; otherwise uses virtual-hosted-style requests. |
 
 ```toml
+# demo
 [[catalog.hms]]
 name = "hms"
 metastore-uri = "127.0.0.1:9083"
-oss-storage = { endpoint = "https://oss-cn-hangzhou.aliyuncs.com", access-key = "access-key", secret-key = "secret-key", path-style-access = false }
+oss-storage = { endpoint = "https://oss-cn-hangzhou.aliyuncs.com", access-key = "access-key", secret-key = "secret-key" }
 ```
 
 ## HDFS

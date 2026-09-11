@@ -26,7 +26,3 @@ The `memory-limit` value is an integer with an optional, case-insensitive unit. 
 | `m`, `mb` | Mebibytes |
 | `g`, `gb` | Gibibytes |
 | `t`, `tb` | Tebibytes |
-
-When `memory-limit` is omitted, Lakelet calculates it once at startup as 80%
-of the effective total memory. If Lakelet cannot determine a
-valid capacity, startup fails and `memory-limit` must be configured explicitly.

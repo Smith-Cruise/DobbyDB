@@ -2,11 +2,11 @@
 icon: lucide/rocket
 ---
 
-# Getting Started
+# Getting started
 
 Lakelet's philosophy is to be simple, fast, and be easy to use.
 
-## Install Lakelet
+## Install binary
 
 The quickest way is the installation script, which downloads the latest nightly
 binary into the current directory as `./lakelet`, along with the example
@@ -18,16 +18,12 @@ curl -fsSL https://lakelet.dev/install.sh | sh
 
 The script supports Linux and macOS (x86_64 and aarch64).
 
-Note that the x86_64 binaries target x86-64-v3 and require a CPU with AVX2
-(Intel Haswell 2013+ / AMD Excavator+), and the Linux binaries require
-glibc 2.35 or newer.
-
 Alternatively, download an archive directly from
 [GitHub Releases](https://github.com/Smith-Cruise/Lakelet/releases) — this is
 also the way to get the Windows build
 (`lakelet-nightly-x86_64-pc-windows-msvc.zip`).
 
-### Build from source
+## Build from source
 
 Lakelet requires a Rust toolchain. Build the release binary from the repository
 root:
@@ -93,7 +89,7 @@ The configuration file is required for normal execution.
 
 You can get more help by `./lakelet --help`.
 
-## Arrow Flight SQL server
+## Start with Arrow Flight SQL server
 
 Lakelet can run as an [Arrow Flight SQL](https://arrow.apache.org/docs/format/FlightSql.html)
 server, including ADBC instead of the interactive REPL:
