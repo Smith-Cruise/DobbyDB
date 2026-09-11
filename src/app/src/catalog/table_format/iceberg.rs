@@ -67,14 +67,12 @@ impl IcebergTableProviderFactory {
 }
 
 fn build_file_io(metadata_location: &str, storage: &Storage) -> Result<FileIO> {
-    // Validate scheme support and storage configuration up front so table
-    // loading fails with a clear error instead of the first lazy file access.
+    // Validate the scheme and the backend config up front so table loading
+    // fails with a clear error instead of the first lazy file access. The
+    // operator itself is discarded: `IcebergStorageFactory` creates one per
+    // authority on demand.
     let (scheme, authority) = parse_location_schema_authority(metadata_location)?;
-    if storage.build_operator(&scheme, &authority)?.is_none() {
-        return Err(DataFusionError::Plan(format!(
-            "no storage configured for scheme '{scheme}' of iceberg metadata location {metadata_location}"
-        )));
-    }
+    storage.build_operator(&scheme, &authority)?;
 
     Ok(FileIOBuilder::new(Arc::new(IcebergStorageFactory::new(storage.clone()))).build())
 }

@@ -310,21 +310,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.name, "hms_1");
-        // No storage block: every scheme except hdfs resolves to None.
-        assert!(
-            config
-                .storage
-                .build_operator("s3", "bucket")
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            config
-                .storage
-                .build_operator("hdfs", "nn:8020")
-                .unwrap()
-                .is_some()
-        );
+        // No storage block: hdfs needs none, and the object-store schemes
+        // fall back to OpenDAL's credential chain (covered in
+        // lakelet_storage::storage).
+        assert!(config.storage.s3_storage.is_none());
+        assert!(config.storage.oss_storage.is_none());
+        assert!(config.storage.build_operator("hdfs", "nn:8020").is_ok());
     }
 
     #[test]
@@ -337,13 +328,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert!(
-            config
-                .storage
-                .build_operator("s3", "bucket")
-                .unwrap()
-                .is_some()
-        );
+        assert!(config.storage.build_operator("s3", "bucket").is_ok());
     }
 
     #[tokio::test]

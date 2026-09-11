@@ -28,7 +28,8 @@ aws-glue-region = "us-west-2"
 aws-glue-access-key = "ak"
 aws-glue-secret-key = "sk"
 # Optional. Object-store credentials used to read the underlying table data.
-# Provide an `s3-storage` block for s3:// / s3a:// locations.
+# Provide an `s3-storage` block for s3:// / s3a:// locations; omit it to use
+# the default AWS credential chain.
 s3-storage = { region = "us-west-2", access-key = "ak", secret-key = "sk" }
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,10 @@ metastore-uri = "127.0.0.1:9087"
 #   oss://           -> oss-storage
 #   hdfs://          -> no storage config needed (the NameNode host:port is
 #                       taken from the table location authority)
+#
+# Without a block, the backend's own credential chain is used (env vars,
+# profile, instance metadata); s3 then needs AWS_REGION in the environment,
+# and oss always needs at least an endpoint.
 #
 # s3-storage keys (all optional):
 #   region, endpoint, access-key, secret-key, path-style-access (bool, default false)
@@ -84,5 +89,6 @@ metastore-uri = "127.0.0.1:9087"
 # token = "<REST catalog access token>"
 # Optional storage credentials, used in preference to any the REST catalog
 # vends. Without a block for a location scheme, credentials vended by the
-# server serve that scheme instead.
+# server serve that scheme, and failing that the backend's own credential
+# chain (env vars, profile, instance metadata).
 # s3-storage = { region = "us-east-1", access-key = "ak", secret-key = "sk" }

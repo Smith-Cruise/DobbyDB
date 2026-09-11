@@ -19,7 +19,8 @@ pub const OSS_SCHEMA: &str = "oss";
 pub const HDFS_SCHEMA: &str = "hdfs";
 
 /// Per-catalog storage configuration. A catalog without any storage block
-/// deserializes to the default value (all backends unset); HDFS needs no
+/// deserializes to the default value (all backends unset); each backend then
+/// falls back to OpenDAL's own credential chain, and HDFS needs no
 /// configuration at all.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Storage {
@@ -35,29 +36,36 @@ impl Storage {
     /// location scheme + authority is mapped onto a storage backend and
     /// credentials.
     ///
-    /// Returns `Ok(None)` when no storage backend is configured for the
-    /// scheme; callers decide whether that is an error. Unsupported schemes
-    /// fail right away.
-    pub fn build_operator(&self, scheme: &str, authority: &str) -> Result<Option<Operator>> {
+    /// A missing configuration block is not an error: an all-default backend
+    /// config leaves credentials to OpenDAL's own chain (environment
+    /// variables, shared profile, instance metadata). Only an unsupported
+    /// scheme fails here; what the backend itself still requires — an s3
+    /// region, an oss endpoint — surfaces as OpenDAL's own config error.
+    pub fn build_operator(&self, scheme: &str, authority: &str) -> Result<Operator> {
         let operator = match scheme {
-            S3_SCHEMA | S3A_SCHEMA => self
-                .s3_storage
-                .as_ref()
-                .map(|s3_storage| s3_storage.build_operator(authority))
-                .transpose()?,
-            OSS_SCHEMA => self
-                .oss_storage
-                .as_ref()
-                .map(|oss_storage| oss_storage.build_operator(authority))
-                .transpose()?,
-            HDFS_SCHEMA => Some(hdfs_storage::build_operator(authority)?),
+            S3_SCHEMA | S3A_SCHEMA => match self.s3_storage.as_ref() {
+                Some(s3_storage) => s3_storage.build_operator(authority),
+                None => S3Storage::default().build_operator(authority),
+            },
+            OSS_SCHEMA => match self.oss_storage.as_ref() {
+                Some(oss_storage) => oss_storage.build_operator(authority),
+                None => OSSStorage::default().build_operator(authority),
+            },
+            HDFS_SCHEMA => hdfs_storage::build_operator(authority),
             _ => {
                 return Err(DataFusionError::NotImplemented(format!(
                     "unsupported storage scheme: {scheme}"
                 )));
             }
         };
-        Ok(operator)
+        // Callers only know the table location, so name the storage this
+        // operator was meant to serve; OpenDAL's own message (a missing
+        // region, an empty endpoint) is kept as the cause.
+        operator.map_err(|error| {
+            error.context(format!(
+                "failed to build storage for {scheme}://{authority}"
+            ))
+        })
     }
 
     /// Build a root-level `ObjectStore` for DataFusion's registry (and
@@ -66,10 +74,9 @@ impl Storage {
         &self,
         scheme: &str,
         authority: &str,
-    ) -> Result<Option<Arc<dyn ObjectStore>>> {
-        Ok(self
-            .build_operator(scheme, authority)?
-            .map(|op| Arc::new(OpendalStore::new(op)) as Arc<dyn ObjectStore>))
+    ) -> Result<Arc<dyn ObjectStore>> {
+        let operator = self.build_operator(scheme, authority)?;
+        Ok(Arc::new(OpendalStore::new(operator)))
     }
 
     pub fn build_paimon_file_io_properties(&self) -> HashMap<String, String> {
@@ -138,9 +145,8 @@ pub fn try_register_storage_info_session(
         return Ok(());
     }
 
-    if let Some(store) = storage.build_root_object_store(&path_schema, &path_bucket)? {
-        registry.register_store(&object_store_path, store);
-    }
+    let store = storage.build_root_object_store(&path_schema, &path_bucket)?;
+    registry.register_store(&object_store_path, store);
     Ok(())
 }
 
@@ -180,10 +186,7 @@ mod tests {
     fn test_build_operator_s3() {
         let storage = parse_toml(S3_TOML);
         for scheme in [S3_SCHEMA, S3A_SCHEMA] {
-            let op = storage
-                .build_operator(scheme, "bucket")
-                .unwrap()
-                .expect("s3 operator should be built");
+            let op = storage.build_operator(scheme, "bucket").unwrap();
             assert_eq!(op.info().name(), "bucket");
             assert_eq!(op.info().scheme(), "s3");
         }
@@ -192,10 +195,7 @@ mod tests {
     #[test]
     fn test_build_operator_oss() {
         let storage = parse_toml(OSS_TOML);
-        let op = storage
-            .build_operator(OSS_SCHEMA, "bucket")
-            .unwrap()
-            .expect("oss operator should be built");
+        let op = storage.build_operator(OSS_SCHEMA, "bucket").unwrap();
         assert_eq!(op.info().name(), "bucket");
         assert_eq!(op.info().scheme(), "oss");
     }
@@ -204,26 +204,8 @@ mod tests {
     fn test_build_operator_hdfs_needs_no_config() {
         let op = Storage::default()
             .build_operator(HDFS_SCHEMA, "namenode:8020")
-            .unwrap()
-            .expect("hdfs operator should be built without storage config");
+            .unwrap();
         assert_eq!(op.info().scheme(), "hdfs-native");
-    }
-
-    #[test]
-    fn test_build_operator_missing_storage_config() {
-        assert!(
-            Storage::default()
-                .build_operator(S3_SCHEMA, "bucket")
-                .unwrap()
-                .is_none()
-        );
-        let storage = parse_toml(S3_TOML);
-        assert!(
-            storage
-                .build_operator(OSS_SCHEMA, "bucket")
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[test]
@@ -236,12 +218,7 @@ mod tests {
     #[test]
     fn test_build_root_object_store() {
         let storage = parse_toml(S3_TOML);
-        assert!(
-            storage
-                .build_root_object_store(S3_SCHEMA, "bucket")
-                .unwrap()
-                .is_some()
-        );
+        assert!(storage.build_root_object_store(S3_SCHEMA, "bucket").is_ok());
         assert!(storage.build_root_object_store("gcs", "bucket").is_err());
     }
 

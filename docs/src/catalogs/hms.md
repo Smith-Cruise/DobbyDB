@@ -10,8 +10,8 @@ Use `[[catalog.hms]]` to connect to a Hive Metastore through Thrift.
 | --- | --- | --- | --- | --- |
 | `name` | String | Yes | None | Unique catalog name used by Lakelet. |
 | `metastore-uri` | String | Yes | None | Hive Metastore address in `host:port` form. |
-| `s3-storage` | Inline table | No | Not configured | Credentials and endpoint for tables stored at `s3://` or `s3a://` locations. |
-| `oss-storage` | Inline table | No | Not configured | Credentials and endpoint for tables stored at `oss://` locations. |
+| `s3-storage` | Inline table | No | Environment credentials | Credentials and endpoint for tables stored at `s3://` or `s3a://` locations. |
+| `oss-storage` | Inline table | No | Environment credentials | Credentials and endpoint for tables stored at `oss://` locations. |
 
 ```toml
 [[catalog.hms]]

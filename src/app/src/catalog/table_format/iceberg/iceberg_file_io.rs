@@ -40,7 +40,8 @@ impl StorageFactory for IcebergStorageFactory {
 }
 
 /// Resolve each location scheme against the catalog's own storage config first,
-/// falling back to the credentials the catalog vended for this table.
+/// falling back to the credentials the catalog vended for this table, and
+/// finally to OpenDAL's own credential chain.
 ///
 /// A configured block wins outright: it is taken as a deliberate choice of
 /// credentials and endpoint, so a block naming only a region still suppresses
@@ -74,8 +75,9 @@ fn resolve_credentials(base: &storage::Storage, config: &StorageConfig) -> stora
             }
         });
 
-    // A scheme neither side supplies stays unset, so `build_operator` reports
-    // it as unconfigured rather than reaching for ambient credentials.
+    // A scheme neither side supplies stays unset; `build_operator` then hands
+    // OpenDAL a bare config, so the priority is this catalog's block, then the
+    // vended credentials, then OpenDAL's own credential chain.
     storage::Storage {
         s3_storage: base.s3_storage.clone().or(vended_s3),
         oss_storage: base.oss_storage.clone().or(vended_oss),
@@ -143,14 +145,6 @@ impl LakeletIcebergStorage {
                                 format!("Failed to build operator for {key}"),
                             )
                             .with_source(error)
-                        })?
-                        .ok_or_else(|| {
-                            Error::new(
-                                ErrorKind::DataInvalid,
-                                format!(
-                                    "no storage configured for scheme '{scheme}' of {location}"
-                                ),
-                            )
                         })?;
                     operators.insert(key.clone(), op.clone());
                     op
@@ -394,22 +388,35 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_requires_storage_config() {
-        let storage = LakeletIcebergStorage::new(storage::Storage::default());
-        // A scheme with no block is reported as unconfigured rather than
-        // signed with whatever credentials the environment happens to hold.
+    fn test_resolve_without_storage_config() {
+        // An s3 block naming only a region resolves for every s3 alias;
+        // credentials are left to OpenDAL's own chain.
+        let storage = LakeletIcebergStorage::new(storage::Storage {
+            s3_storage: Some(S3Storage {
+                region: Some("us-east-1".to_string()),
+                ..Default::default()
+            }),
+            oss_storage: None,
+        });
         for location in [
             "s3://bucket/warehouse/metadata.json",
             "s3a://bucket/warehouse/metadata.json",
-            "oss://bucket/warehouse/metadata.json",
         ] {
-            let error = storage.resolve(location).unwrap_err();
-            assert_eq!(error.kind(), ErrorKind::DataInvalid, "{location}");
-            assert!(
-                error.to_string().contains("no storage configured"),
-                "{location}"
-            );
+            let (op, path) = storage.resolve(location).unwrap();
+            assert_eq!(op.info().scheme(), "s3", "{location}");
+            assert_eq!(path, "warehouse/metadata.json", "{location}");
         }
+
+        // A missing block is no longer a gate of ours: oss fails only because
+        // OpenDAL itself requires an endpoint.
+        let error = LakeletIcebergStorage::new(storage::Storage::default())
+            .resolve("oss://bucket/warehouse/metadata.json")
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unexpected);
+        assert!(
+            error.to_string().contains("Failed to build operator"),
+            "{error}"
+        );
     }
 
     #[test]
