@@ -70,12 +70,7 @@ impl DeltaTableProvider {
     ) -> Result<Self> {
         register_delta_logstore_factories();
         let (scheme, authority) = parse_location_schema_authority(&table_location)?;
-        let store = storage.build_root_object_store(&scheme, &authority)?
-            .ok_or_else(|| {
-                DataFusionError::Plan(format!(
-                    "no storage configured for scheme '{scheme}' of delta table location {table_location}"
-                ))
-            })?;
+        let store = storage.build_root_object_store(&scheme, &authority)?;
         let table_url =
             Url::parse(&table_location).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let builder = DeltaTableBuilder::from_url(table_url.clone())

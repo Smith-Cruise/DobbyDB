@@ -19,14 +19,15 @@ pub const OSS_SCHEMA: &str = "oss";
 pub const HDFS_SCHEMA: &str = "hdfs";
 
 /// Per-catalog storage configuration. A catalog without any storage block
-/// deserializes to the default value (all backends unset); HDFS needs no
+/// deserializes to the default value (all backends unset); each backend then
+/// falls back to OpenDAL's own credential chain, and HDFS needs no
 /// configuration at all.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Storage {
     #[serde(rename = "s3-storage")]
-    s3_storage: Option<S3Storage>,
+    pub s3_storage: Option<S3Storage>,
     #[serde(rename = "oss-storage")]
-    oss_storage: Option<OSSStorage>,
+    pub oss_storage: Option<OSSStorage>,
 }
 
 impl Storage {
@@ -35,29 +36,36 @@ impl Storage {
     /// location scheme + authority is mapped onto a storage backend and
     /// credentials.
     ///
-    /// Returns `Ok(None)` when no storage backend is configured for the
-    /// scheme; callers decide whether that is an error. Unsupported schemes
-    /// fail right away.
-    pub fn build_operator(&self, scheme: &str, authority: &str) -> Result<Option<Operator>> {
+    /// A missing configuration block is not an error: an all-default backend
+    /// config leaves credentials to OpenDAL's own chain (environment
+    /// variables, shared profile, instance metadata). Only an unsupported
+    /// scheme fails here; what the backend itself still requires — an s3
+    /// region, an oss endpoint — surfaces as OpenDAL's own config error.
+    pub fn build_operator(&self, scheme: &str, authority: &str) -> Result<Operator> {
         let operator = match scheme {
-            S3_SCHEMA | S3A_SCHEMA => self
-                .s3_storage
-                .as_ref()
-                .map(|s3_storage| s3_storage.build_operator(authority))
-                .transpose()?,
-            OSS_SCHEMA => self
-                .oss_storage
-                .as_ref()
-                .map(|oss_storage| oss_storage.build_operator(authority))
-                .transpose()?,
-            HDFS_SCHEMA => Some(hdfs_storage::build_operator(authority)?),
+            S3_SCHEMA | S3A_SCHEMA => match self.s3_storage.as_ref() {
+                Some(s3_storage) => s3_storage.build_operator(authority),
+                None => S3Storage::default().build_operator(authority),
+            },
+            OSS_SCHEMA => match self.oss_storage.as_ref() {
+                Some(oss_storage) => oss_storage.build_operator(authority),
+                None => OSSStorage::default().build_operator(authority),
+            },
+            HDFS_SCHEMA => hdfs_storage::build_operator(authority),
             _ => {
                 return Err(DataFusionError::NotImplemented(format!(
                     "unsupported storage scheme: {scheme}"
                 )));
             }
         };
-        Ok(operator)
+        // Callers only know the table location, so name the storage this
+        // operator was meant to serve; OpenDAL's own message (a missing
+        // region, an empty endpoint) is kept as the cause.
+        operator.map_err(|error| {
+            error.context(format!(
+                "failed to build storage for {scheme}://{authority}"
+            ))
+        })
     }
 
     /// Build a root-level `ObjectStore` for DataFusion's registry (and
@@ -66,10 +74,9 @@ impl Storage {
         &self,
         scheme: &str,
         authority: &str,
-    ) -> Result<Option<Arc<dyn ObjectStore>>> {
-        Ok(self
-            .build_operator(scheme, authority)?
-            .map(|op| Arc::new(OpendalStore::new(op)) as Arc<dyn ObjectStore>))
+    ) -> Result<Arc<dyn ObjectStore>> {
+        let operator = self.build_operator(scheme, authority)?;
+        Ok(Arc::new(OpendalStore::new(operator)))
     }
 
     pub fn build_paimon_file_io_properties(&self) -> HashMap<String, String> {
@@ -138,9 +145,8 @@ pub fn try_register_storage_info_session(
         return Ok(());
     }
 
-    if let Some(store) = storage.build_root_object_store(&path_schema, &path_bucket)? {
-        registry.register_store(&object_store_path, store);
-    }
+    let store = storage.build_root_object_store(&path_schema, &path_bucket)?;
+    registry.register_store(&object_store_path, store);
     Ok(())
 }
 
@@ -165,7 +171,7 @@ mod tests {
     use datafusion::prelude::SessionContext;
 
     const S3_TOML: &str = r#"
-        s3-storage = { endpoint = "http://127.0.0.1:9000", region = "cn-north-1", access-key = "ak", secret-key = "sk", path-style-access = true }
+        s3-storage = { endpoint = "http://127.0.0.1:9000", region = "cn-north-1", access-key = "ak", secret-key = "sk", session-token = "token", path-style-access = true }
     "#;
 
     const OSS_TOML: &str = r#"
@@ -180,10 +186,7 @@ mod tests {
     fn test_build_operator_s3() {
         let storage = parse_toml(S3_TOML);
         for scheme in [S3_SCHEMA, S3A_SCHEMA] {
-            let op = storage
-                .build_operator(scheme, "bucket")
-                .unwrap()
-                .expect("s3 operator should be built");
+            let op = storage.build_operator(scheme, "bucket").unwrap();
             assert_eq!(op.info().name(), "bucket");
             assert_eq!(op.info().scheme(), "s3");
         }
@@ -192,10 +195,7 @@ mod tests {
     #[test]
     fn test_build_operator_oss() {
         let storage = parse_toml(OSS_TOML);
-        let op = storage
-            .build_operator(OSS_SCHEMA, "bucket")
-            .unwrap()
-            .expect("oss operator should be built");
+        let op = storage.build_operator(OSS_SCHEMA, "bucket").unwrap();
         assert_eq!(op.info().name(), "bucket");
         assert_eq!(op.info().scheme(), "oss");
     }
@@ -204,26 +204,8 @@ mod tests {
     fn test_build_operator_hdfs_needs_no_config() {
         let op = Storage::default()
             .build_operator(HDFS_SCHEMA, "namenode:8020")
-            .unwrap()
-            .expect("hdfs operator should be built without storage config");
+            .unwrap();
         assert_eq!(op.info().scheme(), "hdfs-native");
-    }
-
-    #[test]
-    fn test_build_operator_missing_storage_config() {
-        assert!(
-            Storage::default()
-                .build_operator(S3_SCHEMA, "bucket")
-                .unwrap()
-                .is_none()
-        );
-        let storage = parse_toml(S3_TOML);
-        assert!(
-            storage
-                .build_operator(OSS_SCHEMA, "bucket")
-                .unwrap()
-                .is_none()
-        );
     }
 
     #[test]
@@ -236,45 +218,54 @@ mod tests {
     #[test]
     fn test_build_root_object_store() {
         let storage = parse_toml(S3_TOML);
-        assert!(
-            storage
-                .build_root_object_store(S3_SCHEMA, "bucket")
-                .unwrap()
-                .is_some()
-        );
+        assert!(storage.build_root_object_store(S3_SCHEMA, "bucket").is_ok());
         assert!(storage.build_root_object_store("gcs", "bucket").is_err());
     }
 
     #[test]
     fn test_parse_storage() {
-        let text = r#"
-            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password", path-style-access = true }
-        "#;
-
-        let storages: Storage = toml::from_str(text).unwrap();
-        assert!(storages.s3_storage.is_some());
-        assert!(storages.oss_storage.is_none());
-        let s3_storage = storages.s3_storage.unwrap();
-        assert_eq!("http://127.0.0.1:9000", &s3_storage.endpoint.unwrap());
-        assert_eq!("us-east-1", &s3_storage.region.unwrap());
-        assert_eq!("admin", &s3_storage.access_key.unwrap());
-        assert_eq!("password", &s3_storage.secret_key.unwrap());
-        assert!(s3_storage.path_style_access);
-
-        let text = r#"
-            s3-storage = { endpoint = "http://127.0.0.1:9000", region = "us-east-1", access-key = "admin", secret-key = "password" }
-            oss-storage = { endpoint = "http://127.0.0.1:9000", access-key = "admin", secret-key = "password", path-style-access = false }
-        "#;
-        let storage: Storage = toml::from_str(text).unwrap();
-        assert!(storage.s3_storage.is_some());
-        assert!(storage.oss_storage.is_some());
+        // Every field of both backends.
+        let storage = parse_toml(
+            r#"
+            s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:9000", access-key = "s3-ak", secret-key = "s3-sk", session-token = "s3-token", path-style-access = true }
+            oss-storage = { endpoint = "https://oss-cn-hangzhou.aliyuncs.com", access-key = "oss-ak", secret-key = "oss-sk", path-style-access = true }
+        "#,
+        );
         let s3_storage = storage.s3_storage.unwrap();
+        assert_eq!("us-east-1", &s3_storage.region.unwrap());
+        assert_eq!("http://127.0.0.1:9000", &s3_storage.endpoint.unwrap());
+        assert_eq!("s3-ak", &s3_storage.access_key.unwrap());
+        assert_eq!("s3-sk", &s3_storage.secret_key.unwrap());
+        assert_eq!("s3-token", &s3_storage.session_token.unwrap());
+        assert!(s3_storage.path_style_access);
+        let oss_storage = storage.oss_storage.unwrap();
+        assert_eq!(
+            "https://oss-cn-hangzhou.aliyuncs.com",
+            &oss_storage.endpoint.unwrap()
+        );
+        assert_eq!("oss-ak", &oss_storage.access_key.unwrap());
+        assert_eq!("oss-sk", &oss_storage.secret_key.unwrap());
+        assert!(oss_storage.path_style_access);
+
+        // Every field is optional, and path-style-access defaults to false.
+        let storage = parse_toml("s3-storage = {}\noss-storage = {}\n");
+        let s3_storage = storage.s3_storage.unwrap();
+        assert!(s3_storage.region.is_none());
+        assert!(s3_storage.endpoint.is_none());
+        assert!(s3_storage.access_key.is_none());
+        assert!(s3_storage.secret_key.is_none());
+        assert!(s3_storage.session_token.is_none());
         assert!(!s3_storage.path_style_access);
         let oss_storage = storage.oss_storage.unwrap();
-        assert_eq!("http://127.0.0.1:9000", &oss_storage.endpoint.unwrap());
-        assert_eq!("admin", &oss_storage.access_key.unwrap());
-        assert_eq!("password", &oss_storage.secret_key.unwrap());
+        assert!(oss_storage.endpoint.is_none());
+        assert!(oss_storage.access_key.is_none());
+        assert!(oss_storage.secret_key.is_none());
         assert!(!oss_storage.path_style_access);
+
+        // A catalog carrying no storage block at all.
+        let storage = parse_toml("");
+        assert!(storage.s3_storage.is_none());
+        assert!(storage.oss_storage.is_none());
     }
 
     #[test]

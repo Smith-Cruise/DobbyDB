@@ -4,7 +4,7 @@ use opendal::Operator;
 use opendal::services::S3Config;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct S3Storage {
     #[serde(rename = "region")]
     pub region: Option<String>,
@@ -14,6 +14,8 @@ pub struct S3Storage {
     pub access_key: Option<String>,
     #[serde(rename = "secret-key")]
     pub secret_key: Option<String>,
+    #[serde(rename = "session-token")]
+    pub session_token: Option<String>,
     #[serde(rename = "path-style-access", default)]
     pub path_style_access: bool,
 }
@@ -28,6 +30,7 @@ impl S3Storage {
         cfg.endpoint = self.endpoint.clone();
         cfg.access_key_id = self.access_key.clone();
         cfg.secret_access_key = self.secret_key.clone();
+        cfg.session_token = self.session_token.clone();
         // OpenDAL defaults to path-style, the inverse of our config default.
         cfg.enable_virtual_host_style = !self.path_style_access;
         build_layered_operator(cfg)

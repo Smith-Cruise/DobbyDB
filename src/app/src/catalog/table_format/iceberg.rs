@@ -1,4 +1,4 @@
-use crate::catalog::table_format::iceberg::iceberg_file_io::LakeletStorageFactory;
+use crate::catalog::table_format::iceberg::iceberg_file_io::IcebergStorageFactory;
 use crate::table_format::iceberg::iceberg_metadata_table_provider::IcebergMetadataTableProvider;
 use crate::table_format::iceberg::iceberg_table_provider::IcebergTableProvider;
 use crate::table_format::metadata_table::MetadataTableType;
@@ -12,10 +12,10 @@ use iceberg::{NamespaceIdent, TableIdent};
 use lakelet_storage::storage::{Storage, parse_location_schema_authority};
 use std::sync::Arc;
 
-mod iceberg_file_io;
+pub(crate) mod iceberg_file_io;
 mod iceberg_metadata_scan;
 pub mod iceberg_metadata_table_provider;
-mod iceberg_table_provider;
+pub(crate) mod iceberg_table_provider;
 
 pub struct IcebergTableProviderFactory {}
 
@@ -67,14 +67,12 @@ impl IcebergTableProviderFactory {
 }
 
 fn build_file_io(metadata_location: &str, storage: &Storage) -> Result<FileIO> {
-    // Validate scheme support and storage configuration up front so table
-    // loading fails with a clear error instead of the first lazy file access.
+    // Validate the scheme and the backend config up front so table loading
+    // fails with a clear error instead of the first lazy file access. The
+    // operator itself is discarded: `IcebergStorageFactory` creates one per
+    // authority on demand.
     let (scheme, authority) = parse_location_schema_authority(metadata_location)?;
-    if storage.build_operator(&scheme, &authority)?.is_none() {
-        return Err(DataFusionError::Plan(format!(
-            "no storage configured for scheme '{scheme}' of iceberg metadata location {metadata_location}"
-        )));
-    }
+    storage.build_operator(&scheme, &authority)?;
 
-    Ok(FileIOBuilder::new(Arc::new(LakeletStorageFactory::new(storage.clone()))).build())
+    Ok(FileIOBuilder::new(Arc::new(IcebergStorageFactory::new(storage.clone()))).build())
 }

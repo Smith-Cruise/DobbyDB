@@ -9,6 +9,7 @@ Lakelet supports these catalogs:
 - [HMS](hms.md)
 - [Glue](glue.md)
 - [Paimon FileSystem](paimon-filesystem.md)
+- [Iceberg REST](iceberg-rest.md)
 
 Storage settings are embedded directly in each catalog entry. See
 [Storage](../storage.md) for their complete field reference.

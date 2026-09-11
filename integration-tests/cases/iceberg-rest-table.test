@@ -1,0 +1,61 @@
+-- TEST: iceberg_rest_orders
+-- DATABASE: iceberg_db
+
+-- QUERY
+SHOW CATALOGS LIKE 'iceberg_rest';
+-- EXPECTED
+catalog_name,catalog_type
+iceberg_rest,ICEBERG-REST
+
+-- QUERY
+SHOW SCHEMAS FROM iceberg_rest;
+-- EXPECTED
+schema_name
+iceberg_rest_db
+
+-- QUERY
+SHOW TABLES FROM iceberg_rest.iceberg_rest_db;
+-- EXPECTED
+table_name
+orders
+
+-- QUERY
+SELECT count(*) FROM iceberg_rest.iceberg_rest_db.orders;
+-- EXPECTED
+count(*)
+4
+
+-- QUERY
+SELECT id, name
+FROM iceberg_rest.iceberg_rest_db.orders
+WHERE dt = '2026-06-25'
+ORDER BY id;
+-- EXPECTED
+id,name
+1,alice
+2,bob
+
+-- QUERY
+SELECT dt, sum(amount) AS total_amount
+FROM iceberg_rest.iceberg_rest_db.orders
+GROUP BY dt
+ORDER BY dt;
+-- EXPECTED
+dt,total_amount
+2026-06-24,19.30
+2026-06-25,30.75
+
+-- QUERY
+SHOW CREATE TABLE iceberg_rest.iceberg_rest_db.orders;
+-- EXPECTED
+definition
+CREATE TABLE `iceberg_rest`.`iceberg_rest_db`.`orders`
+(
+`id` Int32,
+`name` Utf8,
+`amount` Decimal128(10, 2),
+`dt` Utf8
+)
+PARTITIONED BY (`dt`)
+USING ICEBERG
+LOCATION 's3://lakelet-e2e/warehouse/iceberg_rest_db.db/orders'

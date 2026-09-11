@@ -18,6 +18,7 @@ nav = [
       { "HMS" = "catalogs/hms.md" },
       { "Glue" = "catalogs/glue.md" },
       { "Paimon FileSystem" = "catalogs/paimon-filesystem.md" },
+      { "Iceberg REST" = "catalogs/iceberg-rest.md" },
     ] },
     { "Table Formats" = [
       { "Hive" = "table-formats/hive.md" },

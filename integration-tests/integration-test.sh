@@ -36,8 +36,9 @@ integration-tests/download-jars.sh
 
 docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
 
-# 5050: moto container; 32010: the Flight SQL server pytest starts.
-for port in 5050 32010; do
+# 5050: moto container; 8181: the Iceberg REST catalog container;
+# 32010: the Flight SQL server pytest starts.
+for port in 5050 8181 32010; do
   if lsof -nP -iTCP:"${port}" -sTCP:LISTEN >"/tmp/lakelet-integration-port-${port}.txt" 2>/dev/null; then
     echo "Port ${port} is already in use:" >&2
     cat "/tmp/lakelet-integration-port-${port}.txt" >&2

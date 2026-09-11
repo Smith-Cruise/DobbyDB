@@ -170,14 +170,9 @@ mod tests {
         .unwrap();
         assert_eq!(config.name, "paimon_fs_1");
         assert_eq!(config.warehouse, "/tmp/warehouse");
-        // No storage block: every scheme except hdfs resolves to None.
-        assert!(
-            config
-                .storage
-                .build_operator("s3", "bucket")
-                .unwrap()
-                .is_none()
-        );
+        // No storage block: the object-store schemes fall back to OpenDAL's
+        // credential chain (covered in lakelet_storage::storage).
+        assert!(config.storage.s3_storage.is_none());
     }
 
     #[test]
@@ -191,13 +186,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.warehouse, "s3://bucket/warehouse");
-        assert!(
-            config
-                .storage
-                .build_operator("s3", "bucket")
-                .unwrap()
-                .is_some()
-        );
+        assert!(config.storage.build_operator("s3", "bucket").is_ok());
     }
 
     #[test]

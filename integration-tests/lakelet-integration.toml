@@ -10,3 +10,8 @@ s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:5050", access-
 name = "paimon_fs"
 warehouse = "s3://lakelet-e2e/warehouse"
 s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:5050", access-key = "test", secret-key = "test", path-style-access = true }
+
+[[catalog.iceberg-rest]]
+name = "iceberg_rest"
+uri = "http://127.0.0.1:8181"
+s3-storage = { region = "us-east-1", endpoint = "http://127.0.0.1:5050", access-key = "test", secret-key = "test", path-style-access = true }
