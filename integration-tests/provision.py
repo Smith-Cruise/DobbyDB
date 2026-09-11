@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_FILE = REPO_ROOT / "integration-tests" / "docker-compose.yml"
 HOST_ENDPOINT = "http://127.0.0.1:5050"
 SPARK_ENDPOINT = "http://moto:5000"
+REST_CATALOG_SPARK_URI = "http://iceberg-rest:8181"
 REGION = "us-east-1"
 ACCESS_KEY = "test"
 SECRET_KEY = "test"
@@ -159,6 +160,46 @@ def create_iceberg_data() -> None:
             f"spark.sql.catalog.iceberg.s3.secret-access-key={SECRET_KEY}",
             "-f",
             "/integration-tests/create-iceberg-table.sql",
+        ],
+        check=True,
+    )
+
+
+def create_iceberg_rest_data() -> None:
+    subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(COMPOSE_FILE),
+            "exec",
+            "-T",
+            "spark",
+            "/opt/spark/bin/spark-sql",
+            "--jars",
+            ICEBERG_JARS,
+            "--conf",
+            "spark.sql.catalog.iceberg_rest=org.apache.iceberg.spark.SparkCatalog",
+            "--conf",
+            "spark.sql.catalog.iceberg_rest.type=rest",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.uri={REST_CATALOG_SPARK_URI}",
+            "--conf",
+            "spark.sql.catalog.iceberg_rest.io-impl=org.apache.iceberg.aws.s3.S3FileIO",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.warehouse=s3://{BUCKET}/warehouse",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.client.region={REGION}",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.s3.endpoint={SPARK_ENDPOINT}",
+            "--conf",
+            "spark.sql.catalog.iceberg_rest.s3.path-style-access=true",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.s3.access-key-id={ACCESS_KEY}",
+            "--conf",
+            f"spark.sql.catalog.iceberg_rest.s3.secret-access-key={SECRET_KEY}",
+            "-f",
+            "/integration-tests/create-iceberg-rest-table.sql",
         ],
         check=True,
     )
@@ -369,6 +410,7 @@ def main() -> None:
     create_paimon_data()
     register_paimon_table()
     create_iceberg_data()
+    create_iceberg_rest_data()
     create_delta_data()
     register_delta_table()
     create_hive_data()

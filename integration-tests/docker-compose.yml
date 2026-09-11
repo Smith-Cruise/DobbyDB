@@ -32,3 +32,20 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.10.1
+    depends_on:
+      moto:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8181:8181"
+    environment:
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://lakelet-e2e/warehouse
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_CLIENT_REGION: us-east-1
+      CATALOG_S3_ENDPOINT: http://moto:5000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      CATALOG_S3_ACCESS__KEY__ID: test
+      CATALOG_S3_SECRET__ACCESS__KEY: test
