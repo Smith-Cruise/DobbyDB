@@ -66,7 +66,7 @@ Query lake tables directly from your terminal.
 
 Serve Arrow-native query results to ADBC clients and applications.
 
-[Flight SQL Server guide :lucide-arrow-right:](getting-started.md#arrow-flight-sql-server){ .ll-query-link }
+[Flight SQL Server guide :lucide-arrow-right:](getting-started.md#start-with-arrow-flight-sql-server){ .ll-query-link }
 
 </div>
 
